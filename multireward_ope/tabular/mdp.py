@@ -1,7 +1,7 @@
 from __future__ import annotations
 import numpy as np
 import numpy.typing as npt
-from utils import policy_iteration, generate_optimal_policies
+from multireward_ope.tabular.utils import policy_iteration, generate_optimal_policies
 from itertools import product
 from typing import Tuple, List, NamedTuple
 

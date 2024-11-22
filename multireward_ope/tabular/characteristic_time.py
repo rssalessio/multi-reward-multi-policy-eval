@@ -3,8 +3,8 @@ import numpy as np
 import dccp
 import numpy.typing as npt
 from enum import Enum
-from mdp import MDP
-from reward_set import RewardSet, RewardSetCircle, RewardSetType, RewardSetRewardFree, RewardSetBox
+from multireward_ope.tabular.mdp import MDP
+from multireward_ope.tabular.reward_set import RewardSet, RewardSetCircle, RewardSetType, RewardSetRewardFree, RewardSetBox
 from typing import NamedTuple
 
 
@@ -125,25 +125,3 @@ class CharacteristicTimeSolver(object):
         return BoundResult(res, omega.value)
 
 
-
-if __name__ == '__main__':
-    mdp = MDP.generate_random_mdp(3, 2)
-    policy = np.array([0, 1, 0], dtype=np.long)
-    rewards = RewardSetCircle(mdp.dim_state, np.zeros(mdp.dim_state), radius=1, p=2)
-    rbox = RewardSetBox(mdp.dim_state, np.zeros(mdp.dim_state), np.ones(mdp.dim_state))
-    rfree = RewardSetRewardFree(mdp.dim_state)
-    solver = CharacteristicTimeSolver(mdp.dim_state, mdp.dim_action)
-    solver.build_problem(rewards)
-
-    print(solver.solve(0.9, mdp, policy))
-
-    solver.build_problem(rfree)
-    print(solver.solve(0.9, mdp, policy))
-
-    solver.build_problem(rbox)
-    print(solver.solve(0.9, mdp, policy))
-
-    
-
-
-            
