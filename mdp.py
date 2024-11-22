@@ -1,7 +1,7 @@
 from __future__ import annotations
 import numpy as np
 import numpy.typing as npt
-from tabular.utils.utils import policy_iteration, generate_optimal_policies
+from utils import policy_iteration, generate_optimal_policies
 from itertools import product
 from typing import Tuple, List, NamedTuple
 
@@ -41,8 +41,6 @@ class MDP(object):
         self.P = P
         self.abs_tol = abs_tol
 
-        self._boundary_rewards = self.generate_boundary_rewards()
-
     @property
     def dim_state(self) -> int:
         """Number of states"""        
@@ -59,12 +57,16 @@ class MDP(object):
         P = np.random.dirichlet(np.ones(ns), size=(ns, na))
         return MDP(P)
     
-    def build_stationary_matrix(self, pi: npt.NDArray[np.float64],gamma: float) -> npt.NDArray[np.float64]:
-        ns,na = self.dim_state, self.dim_action
-        P = self.P[...,None] * pi[None,None,...]
-        P = P.reshape((ns*na, ns*na))
-        M = (np.eye(ns*na) - gamma * P)
+    def build_stationary_matrix(self, pi: npt.NDArray[np.long], gamma: float) -> npt.NDArray[np.float64]:
+        P = self.P[np.arange(self.dim_state), pi]
+        M = (np.eye(self.dim_state) - gamma * P)
         return np.linalg.inv(M)
+    
+    def build_K(self, pi: npt.NDArray[np.long]) -> npt.NDArray[np.float64]:
+        P = self.P[np.arange(self.dim_state), pi]
+        I = np.eye(self.dim_state)
+        ones = np.ones((self.dim_state, 1))
+        return np.array([(I - ones @ P[[s]]) for s in range(self.dim_state)])
 
     
     def get_mdp_statistics(self, R: npt.NDArray[np.float64], discount_factor: float, eps: float = 1e-16):
