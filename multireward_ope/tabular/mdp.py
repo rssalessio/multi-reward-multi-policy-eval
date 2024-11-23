@@ -4,6 +4,7 @@ import numpy.typing as npt
 from multireward_ope.tabular.utils import policy_iteration, generate_optimal_policies
 from itertools import product
 from typing import Tuple, List, NamedTuple
+from multireward_ope.tabular.policy import Policy
 
 class MDPStatistics(NamedTuple):
     V: npt.NDArray[np.float64]

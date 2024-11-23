@@ -4,6 +4,22 @@ from multireward_ope.tabular.mdp import MDP
 from typing import Tuple, NamedTuple
 
 
+class RiverSwimParameters(NamedTuple):
+    num_states: int = 5
+
+# class DoubleChainParameters(NamedTuple):
+#     length:int = 5
+#     p: float = 0.7
+
+# class NArmsParameters(NamedTuple):
+#     num_arms: int = 6
+#     p0: float = 1.0
+
+# class ForkedRiverSwimParameters(NamedTuple):
+#     river_length: int = 5
+
+
+
 class RiverSwim(MDP):
     """RiverSwim environment
     @See also https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=1374179
@@ -11,15 +27,15 @@ class RiverSwim(MDP):
     current_state: int                      # Current state
     
     def __init__(self, 
-                 num_states: int = 5):
+                 parameters: RiverSwimParameters):
         """Initialize a river swim environment
 
         Parameters
         ----------
-        num_states : int, optional
-            Maximum number of states, by default 5
+        parameters : RiverSwimParameters
+            Parameters of the environment
         """        
-        ns = num_states
+        ns = parameters.num_states
         na = 2
     
         transitions = np.zeros((ns, na, ns))
@@ -29,7 +45,7 @@ class RiverSwim(MDP):
             transitions[s, 1, s] = 0.6
             transitions[s, 1, s-1] = 0.1
             transitions[s, 1, s+1] = 0.3
-        transitions[1:-1, 0, 0:-2] = np.eye(num_states-2)
+        transitions[1:-1, 0, 0:-2] = np.eye(ns-2)
 
         transitions[0, 0, 0] = 1
         transitions[0, 1, 0] = 0.7

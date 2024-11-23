@@ -7,6 +7,7 @@ from enum import Enum
 from multireward_ope.tabular.mdp import MDP
 from multireward_ope.tabular.reward_set import RewardSet, RewardSetCircle, RewardSetType, RewardSetRewardFree, RewardSetBox
 from typing import NamedTuple
+from multireward_ope.tabular.policy import Policy
 
 
 
@@ -36,8 +37,9 @@ class CharacteristicTimeSolver(object):
         self.KG = cp.Parameter((dim_state, dim_state))
         self.e_i = cp.Parameter(dim_state)
         self.solver = solver
-        self.prev_theta = np.zeros((dim_state, dim_state))
-        self.prev_A = np.zeros((dim_state))
+        self.prev_theta = np.zeros((dim_state, dim_state, dim_state), order='C')
+        self.prev_omega = None
+        self.prev_A = np.zeros((dim_state), order='C')
 
     def build_problem(self, rewards: RewardSet):
         """Build problem to improve speed
@@ -53,13 +55,13 @@ class CharacteristicTimeSolver(object):
     def solve(self,
               gamma: float, 
               mdp: MDP,
-              policy: npt.NDArray[np.long]) -> BoundResult:
+              policy: Policy) -> BoundResult:
         """Solve the characteristic time optimization problem
 
         Args:
             gamma (float): discount facotr
             mdp (MDP): MDP considered
-            policy (npt.NDArray[np.long]): deterministic policy of size S
+            policy (Policy): deterministic policy of size S
 
         Returns:
             BoundResult: A tuple containing the value of the problem and the optimal solution
@@ -77,7 +79,7 @@ class CharacteristicTimeSolver(object):
               gamma: float,
               epsilon: float, 
               mdp: MDP,
-              policy: npt.NDArray[np.long]) -> float:
+              policy: Policy) -> float:
         """Solve the characteristic time optimization problem
 
         Args:
@@ -85,7 +87,7 @@ class CharacteristicTimeSolver(object):
             gamma (float): discount factor
             epsilon (float): accuracy level
             mdp (MDP): MDP considered
-            policy (npt.NDArray[np.long]): deterministic policy of size S
+            policy (Policy): deterministic policy of size S
 
         Returns:
             BoundResult: A tuple containing the value of the problem and the optimal solution
@@ -95,10 +97,10 @@ class CharacteristicTimeSolver(object):
         return obj
 
         
-    def _solve(self, A: npt.NDArray[np.float64], gamma: float, mdp: MDP, policy: npt.NDArray[np.long]):
+    def _solve(self, A: npt.NDArray[np.float64], gamma: float, mdp: MDP, policy: Policy):
         normalization = 1 - gamma
         omega = cp.Variable((self.dim_state, self.dim_actions), nonneg=True)
-        if self.prev_omega:
+        if self.prev_omega is not None:
             omega.value = self.prev_omega
 
         constraints = [cp.sum(omega) == 1]
@@ -118,7 +120,7 @@ class CharacteristicTimeSolver(object):
     def _solve_rewardfree(self,
               gamma: float, 
               mdp: MDP,
-              policy: npt.NDArray[np.long]) -> BoundResult:
+              policy: Policy) -> BoundResult:
         G = mdp.build_stationary_matrix(policy, gamma=gamma)
         K = mdp.build_K(policy)
 
@@ -137,7 +139,7 @@ class CharacteristicTimeSolver(object):
     def _solve_general(self,
               gamma: float, 
               mdp: MDP,
-              policy: npt.NDArray[np.long]) -> BoundResult:
+              policy: Policy) -> BoundResult:
         G = mdp.build_stationary_matrix(policy, gamma=gamma)
         K = mdp.build_K(policy)
 
@@ -148,11 +150,11 @@ class CharacteristicTimeSolver(object):
             self.e_i.value = e_i
             for s in range(mdp.dim_state):
                 self.KG.value = K[s] @ G
-                if self.prev_theta:
+                if self.prev_theta is not None:
                     self.theta.value = self.prev_theta[i,s]
                 res = self.MD_problem.solve(method='dccp', solver = self.solver, ccp_times=self.dim_state * 2, max_iter=self.MAX_ITER)[0]
                 A[s,i] = res
-                if self.theta.value:
+                if self.theta.value is not None:
                     self.prev_theta[i,s] = self.theta.value
 
         A = A.max(-1) ** 2

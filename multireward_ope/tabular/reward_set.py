@@ -5,8 +5,9 @@ import numpy.typing as npt
 from typing import Sequence
 from abc import abstractmethod
 from enum import Enum
+from typing import NamedTuple
 
-class RewardSetType(object):
+class RewardSetType(Enum):
     FINITE = 'finite'
     BOX = 'Box'
     CIRCLE = 'Circle'
@@ -14,14 +15,13 @@ class RewardSetType(object):
     REWARD_FREE = 'RewardFree'
     NONE =  'None'
 
-
 class RewardSet(object):
     set_type: RewardSetType
     num_states: int
 
-    def __init__(self, num_states: int):
-        self.set_type = RewardSetType.NONE
-        self.num_states = num_states
+    def __init__(self, num_states: int, set_type: RewardSetType):
+        self.config = set_type
+        self.set_type = set_type
 
     @abstractmethod
     def satisfy_constraints(self, reward: npt.NDArray[np.float64]) -> bool:
@@ -49,71 +49,79 @@ class RewardSet(object):
 
 class RewardSetCircle(RewardSet):
     """ Lp circle, defined by a tuple (center, radius, p-norm)"""
-    center: npt.NDArray[np.float64]
-    radius: float
-    p: int | str
 
-    def __init__(self, num_states: int, center: npt.NDArray[np.float64], radius: float, p: int | str = 2):
-        super().__init__(num_states)
-        self.set_type = RewardSetType.CIRCLE
-        self.center = center
-        self.radius = radius
-        self.p = p
+    class RewardSetCircleConfig(NamedTuple):
+        center: npt.NDArray[np.float64]
+        radius: float
+        p: int | str
+    
+    config: RewardSetCircleConfig
+
+    def __init__(self, num_states: int, config: RewardSetCircleConfig):
+        super().__init__(num_states, RewardSetType.CIRCLE)
+        self.config = config
 
     def satisfy_constraints(self, reward: npt.NDArray[np.float64]) -> bool:
-        norm = np.linalg.norm(reward - self.center, ord=self.p)
-        return np.all([reward >= 0, reward <= 1, norm <= self.radius])
+        norm = np.linalg.norm(reward - self.config.center, ord=self.config.p)
+        return np.all([reward >= 0, reward <= 1, norm <= self.config.radius])
 
     def get_constraints(self, var: cp.Variable) -> Sequence[cp.Constraint]:
-        constraints = [var >= 0, cp.norm(var - self.center, self.p) <= self.radius, var <= 1]
+        constraints = [var >= 0, cp.norm(var - self.config.center, self.config.p) <= self.config.radius, var <= 1]
         return constraints
 
 
 
 class RewardSetPolytope(RewardSet):
     """ We use the H-representation to represent a polytope, Ax<=b"""
-    A: npt.NDArray[np.float64]
-    b: npt.NDArray[np.float64]
+    
+    class RewardSetPolytopeConfig(NamedTuple):
+        A: npt.NDArray[np.float64]
+        b: npt.NDArray[np.float64]
+    
+    config: RewardSetPolytopeConfig
 
-    def __init__(self, num_states: int, A: npt.NDArray[np.float64], b: npt.NDArray[np.float64]):
-        super().__init__(num_states)
-        self.set_type = RewardSetType.POLYTOPE
-        self.A = A
-        self.b = b
+    def __init__(self, num_states: int, config: RewardSetPolytopeConfig):
+        super().__init__(num_states, RewardSetType.POLYTOPE)
+        self.config = config
 
     def satisfy_constraints(self, reward: npt.NDArray[np.float64]) -> bool:
-        return np.all([reward >= 0, reward <= 1, self.A @ reward <= self.b])
+        return np.all([reward >= 0, reward <= 1, self.config.A @ reward <= self.config.b])
 
     def get_constraints(self, var: cp.Variable) -> Sequence[cp.Constraint]:
-        constraints = [var >= 0, self.A @ var <= self.b, var <= 1]
+        constraints = [var >= 0, self.config.A @ var <= self.config.b, var <= 1]
         return constraints
 
 
 class RewardSetBox(RewardSet):
     """ Bounds the reward set as a<=r<=b elementwise """
-    a: npt.NDArray[np.float64]
-    b: npt.NDArray[np.float64]
+    
+    class RewardSetBoxConfig(NamedTuple):
+        a: npt.NDArray[np.float64]
+        b: npt.NDArray[np.float64]
+    
+    config: RewardSetBoxConfig
 
-    def __init__(self, num_states: int, a: npt.NDArray[np.float64], b: npt.NDArray[np.float64]):
-        super().__init__(num_states)
-        self.set_type = RewardSetType.BOX
-        self.a = a
-        self.b = b
+    def __init__(self, num_states: int, config: RewardSetBoxConfig):
+        super().__init__(num_states, RewardSetType.BOX)
+        self.config = config
 
     def satisfy_constraints(self, reward: npt.NDArray[np.float64]) -> bool:
-        return np.all([reward >= np.maximum(0, self.a), reward <= np.minimum(1, self.b)])
+        return np.all([reward >= np.maximum(0, self.config.a), reward <= np.minimum(1, self.config.b)])
 
     def get_constraints(self, var: cp.Variable) -> Sequence[cp.Constraint]:
-        constraints = [var >= np.maximum(0, self.a), var <= np.minimum(1, self.b)]
+        constraints = [var >= np.maximum(0, self.config.a), var <= np.minimum(1, self.config.b)]
         return constraints
 
 
 class RewardSetRewardFree(RewardSet):
     """ Consider the entire set [0,1]^SA """
 
-    def __init__(self, num_states: int):
-        super().__init__(num_states)
-        self.set_type = RewardSetType.REWARD_FREE
+    class RewardSetFreeConfig(NamedTuple):
+        pass
+
+    def __init__(self, num_states: int, config: RewardSetFreeConfig):
+        super().__init__(num_states, RewardSetType.REWARD_FREE)
+        self.config = config
 
     def satisfy_constraints(self, reward: npt.NDArray[np.float64]) -> bool:
         return np.all([reward >= 0, reward <= 1])
@@ -125,20 +133,32 @@ class RewardSetRewardFree(RewardSet):
 class RewardSetFinite(RewardSet):
     """ Consider a finite set of M rewards, each of size S """
 
-    def __init__(self, num_states: int, rewards: npt.NDArray[np.float64]):
-        super().__init__(num_states)
-        self.set_type = RewardSetType.FINITE
-        self.rewards = rewards
-        self.num_rewards = rewards.shape[0]
+    class RewardSetFiniteConfig(NamedTuple):
+        rewards: npt.NDArray[np.float64]
+    
+    config: RewardSetFiniteConfig
+
+    def __init__(self, num_states: int, config: RewardSetFiniteConfig):
+        super().__init__(num_states, RewardSetType.FINITE)
+        self.num_rewards = self.config.rewards.shape[0]
+        self.config = config
 
     def satisfy_constraints(self, reward: npt.NDArray[np.float64]) -> bool:
         if np.any([reward < 0, reward > 1]): return False
 
         for i in range(self.num_rewards):
-            if np.isclose(np.linalg.norm(reward - self.rewards[i]), 0):
+            if np.isclose(np.linalg.norm(reward - self.config.rewards[i]), 0):
                 return True
         return False
 
     def get_constraints(self, var: cp.Variable) -> Sequence[cp.Constraint]:
         constraints = [var >= 0, var <= 1]
         return constraints
+
+
+
+RewardSetConfig = RewardSetBox.RewardSetBoxConfig | \
+                  RewardSetCircle.RewardSetCircleConfig | \
+                  RewardSetRewardFree.RewardSetFreeConfig | \
+                  RewardSetPolytope.RewardSetPolytopeConfig | \
+                  RewardSetFinite.RewardSetFiniteConfig
