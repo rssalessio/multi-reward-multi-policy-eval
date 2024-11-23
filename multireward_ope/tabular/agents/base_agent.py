@@ -4,7 +4,8 @@ import numpy as np
 from abc import ABC, abstractmethod
 from typing import NamedTuple, Callable
 from multireward_ope.tabular.mdp import MDP
-
+from multireward_ope.tabular.characteristic_time import BoundResult, CharacteristicTimeSolver
+from multireward_ope.tabular.reward_set import RewardSet
 
 # Define a named tuple to store experience data
 class Experience(NamedTuple):
@@ -19,7 +20,9 @@ class AgentParameters(NamedTuple):
     discount_factor: float      # Discount factor for future rewards
     horizon: int                # Horizon (time steps) to plan ahead
     frequency_evaluation: int   # How often to evaluate the transition function
-    delta: float = 1e-2         # confidence
+    delta: float                # confidence
+    epsilon: float              # accuracy
+    solver_type: str            # solver value
 
 # Define an abstract agent class
 class Agent(ABC):
@@ -34,9 +37,13 @@ class Agent(ABC):
     omega: npt.NDArray[np.float64]
     horizon: int
     delta: float
+    epsilon: float
+    solver: CharacteristicTimeSolver
+    policy: npt.NDArray[np.long]
+    solver_type: str
 
     # Initialize the agent with agent parameters
-    def __init__(self, agent_parameters: AgentParameters):
+    def __init__(self, agent_parameters: AgentParameters,  policy: npt.NDArray[np.long], rewards: RewardSet):
         self.dim_state_space = agent_parameters.dim_state_space
         self.dim_action_space = agent_parameters.dim_action_space
         self.discount_factor = agent_parameters.discount_factor
@@ -49,10 +56,19 @@ class Agent(ABC):
         self.horizon = agent_parameters.horizon
         self.frequency_evaluation = agent_parameters.frequency_evaluation
         self.delta = agent_parameters.delta
+        self.solver_type = agent_parameters.solver_type
+        self.solver = CharacteristicTimeSolver(self.ns, self.na, solver=self.solver_type)
+        self.solver.build_problem(rewards)
+        self.policy = policy
+        self.epsilon = agent_parameters.epsilon
 
     @property
     def beta(self):
         return self._beta(self.state_action_visits)
+    
+    @property
+    def mdp(self) -> MDP:
+        return MDP(P = self.empirical_transition())
     
     def _beta(self, n: float) -> float:
         c1 = np.log(1 / self.delta)
@@ -68,9 +84,13 @@ class Agent(ABC):
     def U_t(self) -> float:
         w = self.state_action_visits / self.state_action_visits.sum()
         mdp = MDP(P = self.empirical_transition())
-        return evaluate_sampling(w = w, 
-                                 mdp = mdp,
-                                 discount_factor = self.discount_factor)
+        return self.solver.evaluate(
+            omega=self.omega,
+            gamma=self.discount_factor,
+            epsilon=self.epsilon,
+            mdp=mdp,
+            policy=self.policy
+        )
 
     # Property getter for state space dimension
     @property
@@ -89,7 +109,6 @@ class Agent(ABC):
 
     # Method to compute forced exploration probability
     def forced_exploration_callable(self, state: int, step: int, minimum_exploration: float = 1e-3) -> float:
-        #return max(minimum_exploration, (1 / max(1, self.total_state_visits[state] / self.dim_action_space)) ** self.exploration_parameter)
         return max(minimum_exploration, 1 / max(1, self.total_state_visits[state]) ** self.exploration_parameter)
 
     # Abstract method for forward pass

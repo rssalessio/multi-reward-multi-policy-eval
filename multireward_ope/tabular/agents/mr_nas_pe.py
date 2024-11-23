@@ -4,17 +4,17 @@ from multireward_ope.tabular.mdp import MDP
 from multireward_ope.tabular.agents.base_agent import Agent, Experience, AgentParameters
 from typing import NamedTuple, Optional
 from multireward_ope.tabular.characteristic_time import BoundResult, CharacteristicTimeSolver
+from multireward_ope.tabular.reward_set import RewardSet
 from enum import Enum
 import numpy.typing as npt
-from multireward_ope.tabular.reward_set import RewardSet
+
 
 class MRNaSPEParameters(NamedTuple):
     agent_parameters: AgentParameters
     period_computation_omega: int
-    enable_averaging: bool
     alpha: float = 0.99
     beta: float = 0.01
-    type: str = 'MR-NaS-PE'
+    name: str = 'MR-NaS-PE'
 
 class MRNaSPE(Agent):
     """ MR-NaS-PE Algorithm """
@@ -22,23 +22,12 @@ class MRNaSPE(Agent):
     def __init__(self, parameters: MRNaSPEParameters, policy: npt.NDArray[np.long], rewards: RewardSet):
         self.alpha_exp = parameters.alpha
         self.beta_exp = parameters.beta
-        super().__init__(parameters.agent_parameters)
+        super().__init__(parameters.agent_parameters, policy, rewards)
         self.parameters = parameters
         self.uniform_policy = np.ones((self.ns, self.na)) / (self.ns * self.na)
-        if self.parameters.period_computation_omega:
-            self.period_omega = self.parameters.period_computation_omega
-        else:
-            self.period_omega = int(np.ceil(1 / (1 - self.discount_factor)))
         self.updates = 1
         assert 0 < self.alpha_exp + self.beta_exp <=1, "alpha+beta must be in (0,1]"
-        self.solver = CharacteristicTimeSolver(self.ns, self.na, solver=cp.GUROBI)
-        self.solver.build_problem(rewards)
-        self.policy = policy
-    
-    @property
-    def mdp(self) -> MDP:
-        return MDP(P = self.empirical_transition())
-
+ 
     def suggested_exploration_parameter(self, dim_state: int, dim_action: int) -> float:
         return self.alpha_exp
     
@@ -58,7 +47,7 @@ class MRNaSPE(Agent):
 
     def forward(self, state: int, step: int) -> int:
         epsilon = self.forced_exploration_callable(state, step, minimum_exploration=1e-3)
-        exp_policy =  self.compute_exp(state, step) #self.uniform_policy #
+        exp_policy =  self.compute_exp(state, step)
         omega = (1-epsilon) * self.omega + epsilon * exp_policy
         omega = omega[state] / omega[state].sum()
         try:
@@ -72,19 +61,17 @@ class MRNaSPE(Agent):
     def process_experience(self, experience: Experience, step: int) -> None:
         s, a, sp = experience.s_t, experience.a_t,  experience.s_tp1
 
-        if step % self.period_omega == 0:
+        if step % self.parameters.period_computation_omega == 0:
             self.prev_omega = self.omega.copy()
             try:
                 results = self.solver.solve(self.discount_factor, self.mdp, self.policy)
+                if results.w is None:
+                    return
             except:
                 self.updates += 1
                 return
     
             omega = results.w
-            
-            if self.parameters.enable_averaging:
-                omega = ( self.updates * self.omega + omega) / (self.updates + 1)
 
-
-            self.omega = omega
+            self.omega = ( self.updates * self.omega + omega) / (self.updates + 1)
             self.updates += 1
