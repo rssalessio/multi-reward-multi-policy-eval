@@ -2,6 +2,7 @@ import cvxpy as cp
 import numpy as np
 import dccp
 import numpy.typing as npt
+import multiprocessing as mp
 from enum import Enum
 from multireward_ope.tabular.mdp import MDP
 from multireward_ope.tabular.reward_set import RewardSet, RewardSetCircle, RewardSetType, RewardSetRewardFree, RewardSetBox
@@ -22,13 +23,16 @@ class CharacteristicTimeSolver(object):
     e_i: cp.Parameter
     MD_problem: cp.Problem
     rewards: RewardSet
+    solver: str
+    MAX_ITER: int = 500
 
-    def __init__(self, dim_state: int, dim_actions: int):
+    def __init__(self, dim_state: int, dim_actions: int, solver: str = cp.ECOS):
         self.dim_state = dim_state
         self.dim_actions = dim_actions
         self.theta = cp.Variable(dim_state, nonneg=True)
         self.KG = cp.Parameter((dim_state, dim_state))
         self.e_i = cp.Parameter(dim_state)
+        self.solver = solver
 
     def build_problem(self, rewards: RewardSet):
         """Build problem to improve speed
@@ -62,6 +66,22 @@ class CharacteristicTimeSolver(object):
         else:
             return self._solve_general(gamma, mdp, policy)
         
+    def _solve(self, A: npt.NDArray[np.float64], gamma: float, mdp: MDP, policy: npt.NDArray[np.long]):
+        normalization = 1 - gamma
+        omega = cp.Variable((self.dim_state, self.dim_actions), nonneg=True)
+        constraints = [cp.sum(omega) == 1]
+        constraints.extend(
+            [cp.sum(omega[s]) == cp.sum(cp.multiply(mdp.P[:,:,s], omega)) for s in range(self.dim_state)])
+    
+        omega_pi = omega[np.arange(mdp.dim_state), policy]
+        obj = cp.multiply(A, cp.inv_pos(omega_pi)) * normalization
+
+        obj = cp.Minimize(cp.max(obj))
+        T_problem = cp.Problem(obj, constraints)
+        res = T_problem.solve(solver=self.solver)
+        return BoundResult(res / normalization, omega.value)
+
+        
     def _solve_rewardfree(self,
               gamma: float, 
               mdp: MDP,
@@ -77,21 +97,10 @@ class CharacteristicTimeSolver(object):
                 pos_idxs = Ai_s >= 0
                 
                 A[s,i] = np.maximum(Ai_s[pos_idxs].sum(-1), Ai_s[~pos_idxs].sum(-1))
-        A = (A ** 2).max(-1)
+        A = A.max(-1) ** 2
+        return self._solve(A, gamma, mdp, policy)
 
-        omega = cp.Variable((self.dim_state, self.dim_actions), nonneg=True)
-
-        
-        constraints = [cp.sum(omega) == 1]
-        constraints.extend(
-            [cp.sum(omega[s]) == cp.sum(cp.multiply(mdp.P[:,:,s], omega)) for s in range(self.dim_state)])
-    
-        omega_pi = omega[np.arange(mdp.dim_state), policy]
-
-        obj = cp.Minimize(cp.max(cp.multiply(A, cp.inv_pos(omega_pi))))
-        T_problem = cp.Problem(obj, constraints)
-        res = T_problem.solve()
-        return BoundResult(res, omega.value)
+       
 
     def _solve_general(self,
               gamma: float, 
@@ -107,21 +116,11 @@ class CharacteristicTimeSolver(object):
             self.e_i.value = e_i
             for s in range(mdp.dim_state):
                 self.KG.value = K[s] @ G
-                res = self.MD_problem.solve(method='dccp')[0]
+                res = self.MD_problem.solve(method='dccp', solver = self.solver, ccp_times=self.dim_state * 2, max_iter=self.MAX_ITER)[0]
                 A[s,i] = res
-        
-        omega = cp.Variable((self.dim_state, self.dim_actions), nonneg=True)
+
         A = A.max(-1) ** 2
         
-        constraints = [cp.sum(omega) == 1]
-        constraints.extend(
-            [cp.sum(omega[s]) == cp.sum(cp.multiply(mdp.P[:,:,s], omega)) for s in range(self.dim_state)])
-    
-        omega_pi = omega[np.arange(mdp.dim_state), policy]
-
-        obj = cp.Minimize(cp.max(cp.multiply(A, cp.inv_pos(omega_pi))))
-        T_problem = cp.Problem(obj, constraints)
-        res = T_problem.solve()
-        return BoundResult(res, omega.value)
+        return self._solve(A, gamma, mdp, policy)
 
 
