@@ -85,12 +85,14 @@ class Agent(ABC):
     def U_t(self) -> float:
         w = self.state_action_visits / self.state_action_visits.sum()
         mdp = MDP(P = self.empirical_transition())
+        policy = self.policy.argmax(-1)
         return self.solver.evaluate(
-            omega=self.omega,
+            omega=w,
             gamma=self.discount_factor,
             epsilon=self.epsilon,
             mdp=mdp,
-            policy=self.policy
+            policy=policy,
+            force=True
         )
 
     # Property getter for state space dimension
@@ -145,5 +147,16 @@ class Agent(ABC):
         posterior_transition = prior_transition + self.exp_visits
 
         # Compute MLE of the parameters
+        
         P = posterior_transition / posterior_transition.sum(-1, keepdims=True)
+        return P
+    
+    def sample_transition(self, prior_p: float = 1.0) -> npt.NDArray[np.float64]:
+        prior_transition = prior_p * np.ones((self.ns, self.na, self.ns))
+        posterior_transition = prior_transition + self.exp_visits
+        
+        P = np.zeros((self.dim_state_space, self.dim_action_space, self.dim_state_space))
+        for s in range(self.dim_state_space):
+            for a in range(self.dim_action_space):
+                P[s,a] = np.random.dirichlet(posterior_transition[s,a])
         return P

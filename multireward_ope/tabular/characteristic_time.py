@@ -27,7 +27,7 @@ class CharacteristicTimeSolver(object):
     solver: str
     prev_theta: npt.NDArray[np.float64]
     prev_omega: npt.NDArray[np.float64] | None
-    prev_A: npt.NDArray[np.float64]
+    prev_A: npt.NDArray[np.float64] | None
     MAX_ITER: int = 500
 
     def __init__(self, dim_state: int, dim_actions: int, solver: str = cp.ECOS):
@@ -39,7 +39,7 @@ class CharacteristicTimeSolver(object):
         self.solver = solver
         self.prev_theta = np.zeros((dim_state, dim_state, dim_state), order='C')
         self.prev_omega = None
-        self.prev_A = np.zeros((dim_state), order='C')
+        self.prev_A = None
 
     def build_problem(self, rewards: RewardSet):
         """Build problem to improve speed
@@ -79,7 +79,8 @@ class CharacteristicTimeSolver(object):
               gamma: float,
               epsilon: float, 
               mdp: MDP,
-              policy: Policy) -> float:
+              policy: Policy,
+              force: bool = False) -> float:
         """Solve the characteristic time optimization problem
 
         Args:
@@ -92,6 +93,8 @@ class CharacteristicTimeSolver(object):
         Returns:
             BoundResult: A tuple containing the value of the problem and the optimal solution
         """
+        if self.prev_A is None or force:
+            self.solve(gamma, mdp, policy=policy)
         obj = np.multiply(self.prev_A, omega[np.arange(mdp.dim_state), policy]).max()
         obj *= (gamma / (2 * epsilon * (1 -  gamma))) ** 2
         return obj

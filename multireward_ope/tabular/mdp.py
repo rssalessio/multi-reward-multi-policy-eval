@@ -59,7 +59,7 @@ class MDP(object):
         return MDP(P)
     
     def build_stationary_matrix(self, policy: Policy, gamma: float) -> npt.NDArray[np.float64]:
-        P = self.P[np.arange(self.dim_state), Policy]
+        P = self.P[np.arange(self.dim_state), policy]
         M = (np.eye(self.dim_state) - gamma * P)
         return np.linalg.inv(M)
     

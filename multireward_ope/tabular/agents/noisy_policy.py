@@ -19,7 +19,7 @@ class NoisyPolicyParameters(NamedTuple):
 
     @property
     def name(self) -> str:
-        return f'Noisy policy ({self.noise_type.__str__})'
+        return f'Noisy policy ({self.noise_type.__str__()})'
 
 
 class NoisyPolicy(Agent):

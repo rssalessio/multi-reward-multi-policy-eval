@@ -64,7 +64,8 @@ class MRNaSPE(Agent):
         if step % self.parameters.period_computation_omega == 0:
             self.prev_omega = self.omega.copy()
             try:
-                results = self.solver.solve(self.discount_factor, self.mdp, self.policy)
+                mdp = MDP(P = self.sample_transition())#self.empirical_transition())
+                results = self.solver.solve(self.discount_factor, mdp, self.policy)
                 if results.w is None:
                     return
             except:
@@ -73,5 +74,5 @@ class MRNaSPE(Agent):
     
             omega = results.w
 
-            self.omega = ( self.updates * self.omega + omega) / (self.updates + 1)
+            self.omega = omega #( self.updates * self.omega + omega) / (self.updates + 1)
             self.updates += 1
