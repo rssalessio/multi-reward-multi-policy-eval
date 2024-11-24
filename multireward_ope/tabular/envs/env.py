@@ -12,12 +12,11 @@ class EnvType(Enum):
 class EnvParameters(NamedTuple):
     env_type: EnvType
     parameters: RiverSwimParameters # | DoubleChainParameters | NArmsParameters | ForkedRiverSwimParameters
-    horizon: int
 
 def make_env(env: EnvParameters):
     match env.env_type:
         case EnvType.RIVERSWIM:
-            return RiverSwim(num_states=env.parameters.num_states)
+            return RiverSwim(env.parameters)
         # case EnvType.DOUBLE_CHAIN:
         #     return DoubleChain(length = env.parameters.length, p = env.parameters.p)
         # case EnvType.N_ARMS:

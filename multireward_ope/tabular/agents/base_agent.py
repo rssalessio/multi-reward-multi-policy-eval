@@ -59,7 +59,8 @@ class Agent(ABC):
         self.solver_type = agent_parameters.solver_type
         self.solver = CharacteristicTimeSolver(self.ns, self.na, solver=self.solver_type)
         self.solver.build_problem(rewards)
-        self.policy = policy
+        self.policy = np.zeros((self.ns, self.na))
+        self.policy[np.arange(self.ns), policy] = 1.
         self.epsilon = agent_parameters.epsilon
 
     @property

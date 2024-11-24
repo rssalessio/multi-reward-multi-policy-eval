@@ -26,22 +26,25 @@ class NoisyPolicy(Agent):
     """ NoisyPolicy Algorithm """
 
     def __init__(self, parameters: NoisyPolicyParameters, policy: npt.NDArray[np.long], rewards: RewardSet):
-        super().__init__(parameters.agent_parameters, policy, rewards)
         self.parameters = parameters
+        super().__init__(parameters.agent_parameters, policy, rewards)
         self.uniform_policy = np.ones(self.dim_action_space) / self.dim_action_space
     
 
     def forward(self, state: int, step: int) -> int:
-        alpha = self.suggested_exploration_parameter()
+        alpha = self.suggested_exploration_parameter(self.dim_state_space, self.dim_action_space)
+        
         if self.parameters.noise_type == PolicyNoiseType.UNIFORM:
-            policy = (1 - alpha) * self.policy + alpha * self.uniform_policy
+            policy = (1 - alpha) * self.policy[state] + alpha * self.uniform_policy
         elif self.parameters.noise_type == PolicyNoiseType.VISITATION:
-            act_visit = self.state_action_visits[state] / self.state_action_visits[state].sum()
-            policy = (1 - alpha) * self.policy + alpha * act_visit
+            visits = np.maximum(1, self.state_action_visits[state])
+            exp_visits = -visits + visits.max() + 1
+            act_visit = np.exp(np.log(exp_visits) - np.log(np.sum(exp_visits)))
+            policy = (1 - alpha) * self.policy[state] + alpha * act_visit
         return np.random.choice(self.na, p=policy)
-    
+
     def process_experience(self, experience: Experience, step: int) -> None:
         pass
 
-    def suggested_exploration_parameter(self) -> float:
+    def suggested_exploration_parameter(self, dim_state: int, dim_action: int) -> float:
         return self.parameters.noise_parameter

@@ -12,6 +12,6 @@ class PolicyFactory:
     
     @staticmethod
     def random(dim_state: int, dim_action: int) -> Policy:
-        return np.random.choice(dim_action, size=dim_state, dtype=np.ulong)
+        return np.random.choice(dim_action, size=dim_state).astype(dtype=np.ulong)
     
 

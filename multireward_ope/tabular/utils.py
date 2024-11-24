@@ -6,17 +6,8 @@ from typing import Optional, Tuple, List, Callable
 from scipy.linalg._fblas import dger, dgemm
 from typing import NamedTuple
 from itertools import product
+from multireward_ope.tabular.policy import Policy, PolicyFactory
 
-class Results(NamedTuple):
-    step: int
-    omega: NDArray[np.float64]
-    total_state_visits: NDArray[np.float64]
-    last_visit: NDArray[np.float64]
-    exp_visits: NDArray[np.float64]
-    V_res: NDArray[np.float64]
-    Q_res: NDArray[np.float64]
-    pi_res: NDArray[np.float64]
-    elapsed_time: float
 
 def find_optimal_actions(Q: np.ndarray, tol: float = 1e-3) -> List[np.ndarray]:
     num_states = Q.shape[0]
@@ -33,14 +24,14 @@ def generate_optimal_policies(Q: np.ndarray):
     all_possible_policies = list(product(*optimal_actions_per_state))
 
     # Convert to NumPy array
-    policies_array = np.array(all_possible_policies, dtype=np.int64)
+    policies_array = np.array(all_possible_policies, dtype=np.ulong)
     return policies_array
 
 def policy_evaluation(
         gamma: float,
         P: NDArray[np.float64],
         R: NDArray[np.float64],
-        pi: NDArray[np.int64],
+        policy: Policy,
         V0: Optional[NDArray[np.float64]] = None,
         atol: float = 1e-6,
         max_iter: int  = 1000) -> NDArray[np.float64]:
@@ -50,7 +41,7 @@ def policy_evaluation(
         gamma (float): Discount factor
         P (NDArray[np.float64]): Transition function of shape (num_states, num_actions, num_states)
         R (NDArray[np.float64]): Reward function of shape (num_states, num_actions)
-        pi (Optional[NDArray[np.int64]], optional): policy
+        policy (Optional[NDArray[np.ulong]], optional): policy
         V0 (Optional[NDArray[np.float64]], optional): Initial value function. Defaults to None.
         atol (float): Absolute tolerance
 
@@ -67,7 +58,7 @@ def policy_evaluation(
     iter = 0
     for iter in range(max_iter):
         Delta = 0
-        V_next = np.array([P[s, pi[s]] @ (R[s, pi[s]] + gamma * V) for s in range(NS)])
+        V_next = np.array([P[s, policy[s]] @ (R[s, policy[s]] + gamma * V) for s in range(NS)])
         
         Delta = np.max([Delta, np.abs(V_next - V).max()])
         V = V_next
@@ -81,23 +72,23 @@ def policy_iteration(
         gamma: float,
         P: NDArray[np.float64],
         R: NDArray[np.float64],
-        pi0: Optional[NDArray[np.int64]] = None,
+        pi0: Optional[Policy] = None,
         V0: Optional[NDArray[np.float64]] = None,
         atol: float = 1e-6,
-        max_iter: int = 1000) -> Tuple[NDArray[np.float64], NDArray[np.int64], NDArray[np.float64]]:
+        max_iter: int = 1000) -> Tuple[NDArray[np.float64], Policy, NDArray[np.float64]]:
     """Policy iteration
 
     Args:
         gamma (float): Discount factor
         P (NDArray[np.float64]): Transition function of shape (num_states, num_actions, num_states)
         R (NDArray[np.float64]): Reward function of shape (num_states, num_actions)
-        pi0 (Optional[NDArray[np.int64]], optional): Initial policy. Defaults to None.
+        pi0 (Optional[Policy], optional): Initial policy. Defaults to None.
         V0 (Optional[NDArray[np.float64]], optional): Initial value function. Defaults to None.
         atol (float): Absolute tolerance
 
     Returns:
         NDArray[np.float64]: Optimal value function
-        NDArray[np.float64]: Optimal policy
+        Policy: Optimal policy
         NDArray[np.float64]: Optimal Q function
     """
     
@@ -105,7 +96,7 @@ def policy_iteration(
 
     # Initialize values    
     V = V0 if V0 is not None else np.zeros(NS)
-    pi = pi0 if pi0 is not None else np.random.binomial(1, p=0.5, size=(1, NS))
+    pi = pi0 if pi0 is not None else PolicyFactory.random(NS, NA)
     next_pi = np.zeros_like(pi)
     policy_stable = False
 
@@ -113,7 +104,7 @@ def policy_iteration(
     while not policy_stable and iter < max_iter:
         policy_stable = True
         #V = policy_evaluation(gamma, P, R, pi[0], V, atol, max_iter)
-        V = policy_evaluation_c(gamma, P, R[..., np.newaxis] if len(R.shape) == 2 else R, pi[0], atol, max_iter)
+        V = policy_evaluation(gamma, P, R[..., np.newaxis] if len(R.shape) == 2 else R, pi[0], atol, max_iter)
         Q = np.array([[P[s,a] @ (R[s,a] + gamma * V) for a in range(NA)] for s in range(NS)])
         next_pi = generate_optimal_policies(Q)
         
@@ -162,7 +153,8 @@ def project_omega(
 
 def compute_stationary_distribution(
         x: NDArray[np.float64],
-        P: NDArray[np.float64]) -> NDArray[np.float64]:
+        P: NDArray[np.float64],
+        solver: str) -> NDArray[np.float64]:
     """Project omega using navigation constraints
 
     Parameters
@@ -184,8 +176,7 @@ def compute_stationary_distribution(
     constraints.extend([omega[s,a] == x[s,a]/np.sum(x[s]) * cp.sum(omega[s]) for a in range(na) for s in range(ns)])
   
     problem = cp.Problem(cp.Minimize(1), constraints)
-    res = problem.solve(verbose=False, solver=cp.MOSEK)
-    #print(f'res: {res}')
+    res = problem.solve(verbose=False, solver=solver)
     return omega.value
 
 

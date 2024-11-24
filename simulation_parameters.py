@@ -23,3 +23,14 @@ class SimulationParameters(NamedTuple):
 class SimulationConfiguration(NamedTuple):
     sim_parameters: SimulationGeneralParameters
     envs: List[Tuple[EnvParameters, List[NamedTuple]]]
+
+class Results(NamedTuple):
+    step: int
+    omega: npt.NDArray[np.float64]
+    total_state_visits: npt.NDArray[np.float64]
+    last_visit: npt.NDArray[np.float64]
+    exp_visits: npt.NDArray[np.float64]
+    V_res: npt.NDArray[np.float64]
+    Q_res: npt.NDArray[np.float64]
+    pi_res: Policy
+    elapsed_time: float

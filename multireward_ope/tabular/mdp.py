@@ -1,15 +1,15 @@
 from __future__ import annotations
 import numpy as np
 import numpy.typing as npt
-from multireward_ope.tabular.utils import policy_iteration, generate_optimal_policies
+from multireward_ope.tabular.utils import policy_iteration, policy_evaluation
 from itertools import product
-from typing import Tuple, List, NamedTuple
+from typing import Tuple, List, NamedTuple, Sequence
 from multireward_ope.tabular.policy import Policy
 
 class MDPStatistics(NamedTuple):
     V: npt.NDArray[np.float64]
     Q: npt.NDArray[np.float64]
-    pi: npt.NDArray[np.int64]
+    pi:  Policy | Sequence[Policy]
     idxs_subopt_actions: npt.NDArray[np.bool_]
     Delta: npt.NDArray[np.float64]
     Delta_sq: npt.NDArray[np.float64]
@@ -58,13 +58,13 @@ class MDP(object):
         P = np.random.dirichlet(np.ones(ns), size=(ns, na))
         return MDP(P)
     
-    def build_stationary_matrix(self, pi: npt.NDArray[np.long], gamma: float) -> npt.NDArray[np.float64]:
-        P = self.P[np.arange(self.dim_state), pi]
+    def build_stationary_matrix(self, policy: Policy, gamma: float) -> npt.NDArray[np.float64]:
+        P = self.P[np.arange(self.dim_state), Policy]
         M = (np.eye(self.dim_state) - gamma * P)
         return np.linalg.inv(M)
     
-    def build_K(self, pi: npt.NDArray[np.long]) -> npt.NDArray[np.float64]:
-        P = self.P[np.arange(self.dim_state), pi]
+    def build_K(self, policy: Policy) -> npt.NDArray[np.float64]:
+        P = self.P[np.arange(self.dim_state), policy]
         I = np.eye(self.dim_state)
         ones = np.ones((self.dim_state, 1))
         return np.array([(I - ones @ P[[s]]) for s in range(self.dim_state)])
@@ -83,7 +83,7 @@ class MDP(object):
 
         span_V_greedy = np.maximum(np.max(V) - avg_V_greedy, avg_V_greedy- np.min(V))
         span_V_greedy_max = np.max(span_V_greedy[~idxs_subopt])
-        return MDPStatistics(V=V, Q=Q, pi=policies, idxs_subopt_actions=idxs_subopt,
+        return MDPStatistics(V=V, Q=Q, policy=policies, idxs_subopt_actions=idxs_subopt,
                             Delta =gaps,
                              Delta_sq=gaps_sq, avg_V_greedy=avg_V_greedy,
                              var_V_greedy=var_V_greedy, var_V_greedy_max=var_V_greedy_max,
@@ -95,15 +95,10 @@ class MDP(object):
     
     def value_iteration(self, R: npt.NDArray[np.float64], discount_factor: float):
         return self.policy_iteration(R=R, discount_factor=discount_factor)[-1]
-    
-    def generate_boundary_rewards(self) -> npt.NDArray[np.float64]:
-        rewards = np.eye(self.dim_state * self.dim_action)
-        return rewards.reshape(-1, self.dim_state, self.dim_action)
 
-    def generate_random_rewards(self, N: int, alpha: float = 1) -> npt.NDArray[np.float64]:
-        alpha = np.ones(self.dim_state * self.dim_action) * alpha
-        return np.random.dirichlet(alpha, size=N).reshape(N, self.dim_state, self.dim_action)
-    
+    def policy_evaluation(self, R: npt.NDArray[np.float64], discount_factor: float, policy: Policy):
+        return policy_evaluation(discount_factor, P=self.P, R=R, policy=policy)
+
     def eval_transition(self, Phat: npt.NDArray[np.float64], R: npt.NDArray[np.float64], discount_factor: float) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         N = R.shape[0]
 
