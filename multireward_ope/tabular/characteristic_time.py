@@ -6,7 +6,7 @@ import multiprocessing as mp
 from enum import Enum
 from multireward_ope.tabular.mdp import MDP
 from multireward_ope.tabular.reward_set import RewardSet, RewardSetCircle, RewardSetType, RewardSetRewardFree, RewardSetBox
-from typing import NamedTuple
+from typing import NamedTuple, Sequence
 from multireward_ope.tabular.policy import Policy
 
 
@@ -25,6 +25,7 @@ class CharacteristicTimeSolver(object):
     MD_problem: cp.Problem
     rewards: RewardSet
     solver: str
+    vertices: npt.NDArray[np.float64]
     prev_theta: npt.NDArray[np.float64]
     prev_omega: npt.NDArray[np.float64] | None
     prev_A: npt.NDArray[np.float64] | None
@@ -66,10 +67,12 @@ class CharacteristicTimeSolver(object):
         Returns:
             BoundResult: A tuple containing the value of the problem and the optimal solution
         """
-        if self.rewards.set_type == RewardSetType.FINITE:
-            raise Exception('Finite set not implemented')
+        if self.rewards.set_type == RewardSetType.FINITE or self.rewards.set_type == RewardSetType.POLYTOPE:
+            return self._solve_finite(gamma, mdp, policy)
         elif self.rewards.set_type == RewardSetType.REWARD_FREE:
             return self._solve_rewardfree(gamma, mdp, policy)
+        elif self.rewards.set_type == RewardSetType.NONE:
+            raise Exception('RewardsSetType is set to None!')
         else:
             return self._solve_general(gamma, mdp, policy)
         
@@ -160,6 +163,32 @@ class CharacteristicTimeSolver(object):
                 if self.theta.value is not None:
                     self.prev_theta[i,s] = self.theta.value
 
+        A = A.max(-1) ** 2
+        self.prev_A = A
+        
+        return self._solve(A, gamma, mdp, policy)
+
+
+    def _solve_finite(self,
+              gamma: float, 
+              mdp: MDP,
+              policy: Policy) -> BoundResult:
+        G = mdp.build_stationary_matrix(policy, gamma=gamma)
+        K = mdp.build_K(policy)
+        A = np.zeros((mdp.dim_state, mdp.dim_state))
+
+        rewards: npt.NDArray[np.float64] = self.rewards.rewards
+        nr = rewards.shape[0]
+        for i in range(mdp.dim_state):
+            e_i = np.zeros(self.dim_state)
+            e_i[i] = 1
+            for s in range(mdp.dim_state):
+                obj = []
+                KG = K[s] @ G
+                for r in range(nr):
+                    obj.append(np.abs(e_i.T @ KG @ r))
+                res = np.max(obj)
+                A[s,i] = res
         A = A.max(-1) ** 2
         self.prev_A = A
         

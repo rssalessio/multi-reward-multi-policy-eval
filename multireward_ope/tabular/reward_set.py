@@ -1,3 +1,4 @@
+from __future__ import annotations
 import cvxpy as cp
 import numpy as np
 import numpy as np
@@ -6,10 +7,11 @@ from typing import Sequence
 from abc import abstractmethod
 from enum import Enum
 from typing import NamedTuple
+from scipy.spatial import HalfspaceIntersection
+from multireward_ope.tabular.utils import find_interior
 
 class RewardSetType(Enum):
-    FINITE = 'finite'
-    BOX = 'Box'
+    FINITE = 'Finite'
     CIRCLE = 'Circle'
     POLYTOPE = 'Polytope'
     REWARD_FREE = 'RewardFree'
@@ -114,47 +116,56 @@ class RewardSetCircle(RewardSet):
 
 
 class RewardSetPolytope(RewardSet):
-    """ We use the H-representation to represent a polytope, Ax<=b"""
+    """ Polytopic reward set.
+        We use the H-representation to represent a polytope, Ax<=b
+    """
     
     class RewardSetPolytopeConfig(NamedTuple):
-        A: npt.NDArray[np.float64]
-        b: npt.NDArray[np.float64]
+        """Polytope reward set configuration
+
+        Args:
+            halfspaces: ndarray of floats, shape (nineq, ndim+1)
+                        Stacked Inequalities of the form Ax + b <= 0 in format [A; b]
+        """
+        halfspaces: npt.NDArray[np.float64]
     
     config: RewardSetPolytopeConfig
+    intersection: HalfspaceIntersection
+    vertices: npt.NDArray[np.float64]
+    A: npt.NDArray[np.float64]
+    b: npt.NDArray[np.float64]
 
     def __init__(self, num_states: int, num_actions: int, config: RewardSetPolytopeConfig):
         super().__init__(num_states, num_actions, RewardSetType.POLYTOPE)
         self.config = config
+        interior_point = find_interior(config.halfspaces)
+        self.intersection = HalfspaceIntersection(config.halfspaces, interior_point)
+        self.A = config.halfspaces[:,:-1]
+        self.b = config.halfspaces[:,-1]
+        self.vertices = self.intersection.intersections
 
     def satisfy_constraints(self, reward: npt.NDArray[np.float64]) -> bool:
-        constraints = [reward >= 0, reward <= 1, self.config.A @ reward <= self.config.b]
+        constraints = [reward >= 0, reward <= 1, self.A @ reward <= self.b]
         return np.all([np.all(c) for c in constraints])
 
     def get_constraints(self, var: cp.Variable) -> Sequence[cp.Constraint]:
-        constraints = [var >= 0, self.config.A @ var <= self.config.b, var <= 1]
+        constraints = [var >= 0, self.A @ var <= self.b, var <= 1]
         return constraints
-
-
-class RewardSetBox(RewardSet):
-    """ Bounds the reward set as a<=r<=b elementwise """
     
-    class RewardSetBoxConfig(NamedTuple):
-        a: npt.NDArray[np.float64]
-        b: npt.NDArray[np.float64]
-    
-    config: RewardSetBoxConfig
+    @property
+    def rewards(self) -> npt.NDArray[np.float64]:
+        return self.vertices
 
-    def __init__(self, num_states: int, num_actions: int, config: RewardSetBoxConfig):
-        super().__init__(num_states, num_actions, RewardSetType.BOX)
-        self.config = config
+    @staticmethod
+    def from_box(num_states: int, num_actions: int, a: npt.NDArray[np.float64], b: npt.NDArray[np.float64]) -> RewardSetPolytope:
+        """ Bounds the reward set as a<=r<=b elementwise """
+        n = a.shape[0]
+        A = np.vstack([np.eye(n), -np.eye(n)])
+        c = np.hstack([-b, a])
+        halfspaces = np.hstack([A, c[:,None]])
 
-    def satisfy_constraints(self, reward: npt.NDArray[np.float64]) -> bool:
-        constraints = [reward >= np.maximum(0, self.config.a), reward <= np.minimum(1, self.config.b)]
-        return np.all([np.all(c) for c in constraints])
-
-    def get_constraints(self, var: cp.Variable) -> Sequence[cp.Constraint]:
-        constraints = [var >= np.maximum(0, self.config.a), var <= np.minimum(1, self.config.b)]
-        return constraints
+        return RewardSetPolytope(num_states, num_actions,
+                         RewardSetPolytope.RewardSetPolytopeConfig(halfspaces))
 
 
 class RewardSetRewardFree(RewardSet):
@@ -199,11 +210,14 @@ class RewardSetFinite(RewardSet):
     def get_constraints(self, var: cp.Variable) -> Sequence[cp.Constraint]:
         constraints = [var >= 0, var <= 1]
         return constraints
+    
+    @property
+    def rewards(self) -> npt.NDArray[np.float64]:
+        return self.config.rewards
 
 
 
-RewardSetConfig = RewardSetBox.RewardSetBoxConfig | \
-                  RewardSetCircle.RewardSetCircleConfig | \
+RewardSetConfig = RewardSetCircle.RewardSetCircleConfig | \
                   RewardSetRewardFree.RewardSetFreeConfig | \
                   RewardSetPolytope.RewardSetPolytopeConfig | \
                   RewardSetFinite.RewardSetFiniteConfig

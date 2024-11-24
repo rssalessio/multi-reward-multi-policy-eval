@@ -64,6 +64,11 @@ class Agent(ABC):
         self.epsilon = agent_parameters.epsilon
 
     @property
+    @abstractmethod
+    def name(self) -> str:
+        raise Exception('Method name not implemented')
+
+    @property
     def beta(self):
         return self._beta(self.state_action_visits)
     

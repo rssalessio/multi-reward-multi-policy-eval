@@ -17,9 +17,7 @@ class NoisyPolicyParameters(NamedTuple):
     noise_type: PolicyNoiseType
     noise_parameter: float
 
-    @property
-    def name(self) -> str:
-        return f'Noisy policy ({self.noise_type.__str__()})'
+    
 
 
 class NoisyPolicy(Agent):
@@ -30,7 +28,10 @@ class NoisyPolicy(Agent):
         super().__init__(parameters.agent_parameters, policy, rewards)
         self.uniform_policy = np.ones(self.dim_action_space) / self.dim_action_space
     
-
+    @property
+    def name(self) -> str:
+        return f'Noisy policy ({self.parameters.noise_type.__str__()})'
+    
     def forward(self, state: int, step: int) -> int:
         alpha = self.suggested_exploration_parameter(self.dim_state_space, self.dim_action_space)
         

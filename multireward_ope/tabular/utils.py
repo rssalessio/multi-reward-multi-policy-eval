@@ -1,6 +1,5 @@
 import numpy as np
 import cvxpy as cp
-from cvxpy.constraints.constraint import Constraint
 from numpy.typing import NDArray
 from typing import Optional, Tuple, List, Callable
 from scipy.linalg._fblas import dger, dgemm
@@ -247,3 +246,27 @@ def gram_schmidt(vectors):
         if (w > 1e-10).any():  
             basis.append(w) #/np.linalg.norm(w))
     return np.array(basis)
+
+def find_interior(halfspaces: NDArray[np.float64], solver: str = cp.CLARABEL) -> NDArray[np.float64]:
+    """Returns a point clearly inside the region defined by halfspaces.
+
+    Args:
+        halfspaces (NDArray[np.float64]): Stacked Inequalities of the form Ax + b <= 0 in
+                                           format [A; b]
+
+    Returns:
+        NDArray[np.float64]: A feasible point
+    """
+    A = halfspaces[:,:-1]
+    b = halfspaces[:,-1]
+    x = cp.Variable(A.shape[0])
+    y = cp.Variable()
+
+    constraints = [
+        A @ x + y * np.linalg.norm(A[i], ord=2) <= -b for i in range(A.shape[0])
+    ]
+
+    obj = cp.Maximize(y)
+    problem = cp.Problem(obj, constraints)
+    res = problem.solve(solver=solver)
+    return x.value
