@@ -259,7 +259,7 @@ def find_interior(halfspaces: NDArray[np.float64], solver: str = cp.CLARABEL) ->
     """
     A = halfspaces[:,:-1]
     b = halfspaces[:,-1]
-    x = cp.Variable(A.shape[0])
+    x = cp.Variable(A.shape[1])
     y = cp.Variable()
 
     constraints = [

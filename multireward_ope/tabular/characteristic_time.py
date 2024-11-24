@@ -2,10 +2,8 @@ import cvxpy as cp
 import numpy as np
 import dccp
 import numpy.typing as npt
-import multiprocessing as mp
-from enum import Enum
 from multireward_ope.tabular.mdp import MDP
-from multireward_ope.tabular.reward_set import RewardSet, RewardSetCircle, RewardSetType, RewardSetRewardFree, RewardSetBox
+from multireward_ope.tabular.reward_set import RewardSet, RewardSetPolytope, RewardSetType, RewardSetRewardFree
 from typing import NamedTuple, Sequence
 from multireward_ope.tabular.policy import Policy
 
@@ -186,7 +184,7 @@ class CharacteristicTimeSolver(object):
                 obj = []
                 KG = K[s] @ G
                 for r in range(nr):
-                    obj.append(np.abs(e_i.T @ KG @ r))
+                    obj.append(np.abs(e_i.T @ KG @ rewards[r]))
                 res = np.max(obj)
                 A[s,i] = res
         A = A.max(-1) ** 2
