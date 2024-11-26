@@ -1,11 +1,16 @@
+from __future__ import annotations
 import numpy as np
 import numpy.typing as npt
+from dataclasses import dataclass
 from multireward_ope.tabular.mdp import MDP
 from typing import Tuple, NamedTuple
 
-
-class RiverSwimParameters(NamedTuple):
+@dataclass
+class RiverSwimParameters(object):
     num_states: int = 5
+
+    def build(self) -> RiverSwim:
+        return RiverSwim(self)
 
 # class DoubleChainParameters(NamedTuple):
 #     length:int = 5

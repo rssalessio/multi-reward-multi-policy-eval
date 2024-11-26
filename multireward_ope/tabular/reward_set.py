@@ -196,7 +196,7 @@ class RewardSetFinite(RewardSet):
 
     def __init__(self, num_states: int, num_actions: int, config: RewardSetFiniteConfig):
         super().__init__(num_states, num_actions, RewardSetType.FINITE)
-        self.num_rewards = self.config.rewards.shape[0]
+        self.num_rewards = config.rewards.shape[0]
         self.config = config
 
     def satisfy_constraints(self, reward: npt.NDArray[np.float64]) -> bool:
