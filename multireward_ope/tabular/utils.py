@@ -31,7 +31,6 @@ def policy_evaluation(
         P: NDArray[np.float64],
         R: NDArray[np.float64],
         policy: Policy,
-        V0: Optional[NDArray[np.float64]] = None,
         atol: float = 1e-6,
         max_iter: int  = 1000) -> NDArray[np.float64]:
     """Policy evaluation
@@ -50,10 +49,8 @@ def policy_evaluation(
     
     NS, NA = P.shape[:2]
     # Initialize values
-    if V0 is None:
-        V0 = np.zeros(NS)
     
-    V = V0.copy()
+    V = np.zeros(NS)
     iter = 0
     for iter in range(max_iter):
         Delta = 0
@@ -74,7 +71,7 @@ def policy_iteration(
         pi0: Optional[Policy] = None,
         V0: Optional[NDArray[np.float64]] = None,
         atol: float = 1e-6,
-        max_iter: int = 1000) -> Tuple[NDArray[np.float64], Policy, NDArray[np.float64]]:
+        max_iter: int = 100) -> Tuple[NDArray[np.float64], Policy, NDArray[np.float64]]:
     """Policy iteration
 
     Args:
@@ -103,9 +100,9 @@ def policy_iteration(
     while not policy_stable and iter < max_iter:
         policy_stable = True
         #V = policy_evaluation(gamma, P, R, pi[0], V, atol, max_iter)
-        V = policy_evaluation(gamma, P, R[..., np.newaxis] if len(R.shape) == 2 else R, pi[0], atol, max_iter)
+        V = policy_evaluation(gamma, P, R[..., np.newaxis] if len(R.shape) == 2 else R, pi, atol, max_iter)
         Q = np.array([[P[s,a] @ (R[s,a] + gamma * V) for a in range(NA)] for s in range(NS)])
-        next_pi = generate_optimal_policies(Q)
+        next_pi = Q.argmax(-1)#generate_optimal_policies(Q)
         
         if np.any(next_pi.shape != pi.shape) or np.any(next_pi != pi):
             policy_stable = False

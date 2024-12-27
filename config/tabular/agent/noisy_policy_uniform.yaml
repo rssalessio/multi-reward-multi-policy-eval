@@ -1,0 +1,6 @@
+type: 'Noisy-Policy'
+parameters:
+  noise_type: 'Uniform'
+  noise_parameter: 0.3
+
+    

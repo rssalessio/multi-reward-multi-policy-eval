@@ -1,0 +1,4 @@
+type: 'Riverswim'
+parameters:
+  num_states: 30
+  p_right: 0.7

@@ -51,6 +51,17 @@ class RewardSet(object):
             Sequence[cp.Constraint]: List of constraints
         """
         raise Exception('Not implemented')
+
+    def canonical_rewards(self) -> npt.NDArray[np.float64]:
+        """Generate the canonical (projected) set of rewards
+
+        Returns:
+            Sequence[npt.NDArray[np.float64]]: S  rewards of size S
+        """
+        D = self.num_states
+        rewards = np.diag(np.ones(D))
+        rewards = np.array([self.project_reward(rewards[i]) for i in range(D)])
+        return rewards
     
     def sample(self, n: int) -> Sequence[npt.NDArray[np.float64]]:
         """Sample n reward vectors from the set
@@ -145,11 +156,11 @@ class RewardSetPolytope(RewardSet):
         self.vertices = self.intersection.intersections
 
     def satisfy_constraints(self, reward: npt.NDArray[np.float64]) -> bool:
-        constraints = [reward >= 0, reward <= 1, self.A @ reward <= self.b]
+        constraints = [reward >= 0, reward <= 1, self.A @ reward+ self.b <= 0]
         return np.all([np.all(c) for c in constraints])
 
     def get_constraints(self, var: cp.Variable) -> Sequence[cp.Constraint]:
-        constraints = [var >= 0, self.A @ var <= self.b, var <= 1]
+        constraints = [var >= 0, self.A @ var + self.b <= 0, var <= 1]
         return constraints
     
     @property
@@ -161,7 +172,7 @@ class RewardSetPolytope(RewardSet):
         """ Bounds the reward set as a<=r<=b elementwise """
         n = a.shape[0]
         A = np.vstack([np.eye(n), -np.eye(n)])
-        c = np.hstack([-b, a])
+        c = np.hstack([-b,a])
         halfspaces = np.hstack([A, c[:,None]])
 
         return RewardSetPolytope(num_states, num_actions,

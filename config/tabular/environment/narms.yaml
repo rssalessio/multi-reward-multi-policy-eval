@@ -1,0 +1,4 @@
+type: 'NArms'
+parameters:
+  num_arms: 6
+  p0: 1.0

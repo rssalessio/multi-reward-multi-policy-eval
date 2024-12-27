@@ -1,62 +1,63 @@
 from __future__ import annotations
 import numpy as np
 import numpy.typing as npt
-from dataclasses import dataclass
 from multireward_ope.tabular.mdp import MDP
-from typing import Tuple, NamedTuple
+from typing import Tuple
+from dataclasses import dataclass
 
 @dataclass
-class RiverSwimConfig(object):
-    num_states: int = 5
-    p_right: float = 0.3
+class DoubleChainConfig(object):
+    length: int = 5
+    p: float = 0.7
 
-    def build(self) -> RiverSwim:
-        return RiverSwim(self)
+    def build(self) -> DoubleChain:
+        return DoubleChain(self)
     
     @staticmethod
-    def name(cls: RiverSwimConfig) -> str:
-        return f'{cls.num_states}'
+    def name(cls: DoubleChainConfig) -> str:
+        return f'{cls.length * 2 + 1}'
 
-
-
-class RiverSwim(MDP):
-    """RiverSwim environment
-    @See also https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=1374179
+class DoubleChain(MDP):
+    """DoubleChain environment
+    @See also https://arxiv.org/pdf/2102.12769.pdf
     """
     current_state: int                      # Current state
+    length: int                             # Chain length
+    p: float                                # Transition probability
+    RIGHT = 0
+    LEFT = 1
     
     def __init__(self, 
-                 cfg: RiverSwimConfig):
-        """Initialize a river swim environment
+                 cfg: DoubleChainConfig):
+        """Initialize a double chain environment
 
         Parameters
         ----------
-        parameters : RiverSwimParameters
-            Parameters of the environment
-        """        
-        ns = cfg.num_states
+        length : int, optional
+            Chain length, by default is 5
+        p: float, optional
+            Transition probability, by default is 0.7
+        """
+        self.length = cfg.length
+        self.p = cfg.p
+        ns = 2*self.length + 1
         na = 2
-
-        p_right = cfg.p_right
     
         transitions = np.zeros((ns, na, ns))
+        s0, s1, sl, sl_1, s_2l_1 = 0, 1, self.length, self.length+1, ns-1
         
         # Create transitions
-        y = (1 - p_right) * 6/7
+        for start, end in [(s1, sl), (sl_1, s_2l_1)]:
+            for s in range(start, end+1):
+                next_state = s+1 if s != end else end
+                prev_state = s-1 if s != sl_1 else s0
+                transitions[s, DoubleChain.RIGHT, next_state] = self.p
+                transitions[s, DoubleChain.RIGHT, prev_state] = 1-self.p
+                transitions[s, DoubleChain.LEFT, prev_state] = 1
 
-        for s in range(1, ns-1):
-            transitions[s, 1, s] = y
-            transitions[s, 1, s-1] = y / 6
-            transitions[s, 1, s+1] = p_right
-        transitions[1:-1, 0, 0:-2] = np.eye(ns-2)
+        transitions[s0, DoubleChain.RIGHT, sl_1] = 1
+        transitions[s0, DoubleChain.LEFT, s1] = 1
 
-        transitions[0, 0, 0] = 1
-        transitions[0, 1, 0] = 1-p_right
-        transitions[0, 1, 1] = p_right
-        transitions[-1, 1, -1] = p_right
-        transitions[-1, 1, -2] = 1-p_right
-        transitions[-1, 0, -2] = 1
-        
         super().__init__(transitions)
         # Reset environment
         self.reset()
@@ -65,8 +66,9 @@ class RiverSwim(MDP):
         rewards = np.zeros((self.dim_state, self.dim_action))
         
         # Create rewards
-        rewards[0, 0] = min_reward
-        rewards[-1, 1] = max_reward
+        rewards[0, :] = min_reward
+        rewards[self.length, DoubleChain.RIGHT] = max_reward
+        rewards[self.dim_state - 1, DoubleChain.RIGHT] = max_reward
         return rewards
     
     def reset(self) -> int:
@@ -94,7 +96,6 @@ class RiverSwim(MDP):
             Next state and reward
         """        
         assert action == 0 or action == 1, 'Action needs to either 0 or 1'
-        
         next_state = np.random.choice(self.dim_state, p=self.P[self.current_state, action])
         rew = None if reward is None else reward[self.current_state, action]
         self.current_state = next_state

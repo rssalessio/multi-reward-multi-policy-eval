@@ -1,18 +1,19 @@
 from enum import Enum
-from multireward_ope.tabular.agents.base_agent import AgentParameters, Agent
-from multireward_ope.tabular.agents.mr_nas_pe import MRNaSPE, MRNaSPEParameters
-from multireward_ope.tabular.agents.noisy_policy import NoisyPolicy, NoisyPolicyParameters, PolicyNoiseType
-from multireward_ope.tabular.reward_set import RewardSet
-from multireward_ope.tabular.policy import Policy
+from multireward_ope.tabular.agents.base_agent import Agent
+from multireward_ope.tabular.agents.mr_nas_pe import MRNaSPE
+from multireward_ope.tabular.agents.noisy_policy import NoisyPolicy
+from multireward_ope.tabular.agents.gvf_explorer import GVFExplorer
+from multireward_ope.tabular.dataclasses import AgentParameters
+from multireward_ope.tabular.agents.dataclasses import AgentType
 
-class AgentType(Enum):
-    NOISY_POLICY = 'Noisy Policy'
-    MR_NAS_PE = 'MR-NaS-PE'
 
-def make_agent(agent_parameters: AgentParameters, policy: Policy, reward_set: RewardSet) -> Agent:
-    if isinstance(agent_parameters, MRNaSPEParameters):
-        return MRNaSPE(agent_parameters, policy, reward_set)
-    elif isinstance(agent_parameters, NoisyPolicyParameters):
-        return NoisyPolicy(agent_parameters, policy, reward_set)
-    else:
-        raise NotImplementedError(f'Type {agent_parameters.__str__} not found.')
+def make_agent(cfg: AgentParameters, **kwargs) -> Agent:
+    match cfg.type:
+        case AgentType.NOISY_POLICY:
+            return NoisyPolicy(agent_params=cfg.parameters, **kwargs)
+        case AgentType.GVFExplorer:
+            return GVFExplorer(cfg=cfg.parameters, **kwargs)
+        case AgentType.MR_NAS_PE:
+            return MRNaSPE(cfg=cfg.parameters, **kwargs)
+        case _:
+            raise NotImplementedError(f'Type {cfg.type} not found.')

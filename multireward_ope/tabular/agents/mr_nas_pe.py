@@ -1,39 +1,41 @@
+from __future__ import annotations
 import numpy as np
 import cvxpy as cp
 from multireward_ope.tabular.mdp import MDP
-from multireward_ope.tabular.agents.base_agent import Agent, Experience, AgentParameters
+from multireward_ope.tabular.agents.base_agent import Agent, Experience
 from typing import NamedTuple, Optional
 from multireward_ope.tabular.characteristic_time import BoundResult, CharacteristicTimeSolver
 from multireward_ope.tabular.reward_set import RewardSet
 from enum import Enum
+from dataclasses import dataclass
 import numpy.typing as npt
 
-
-class MRNaSPEParameters(NamedTuple):
-    agent_parameters: AgentParameters
-    period_computation_omega: int
+@dataclass
+class MRNaSPEConfig:
+    policy_update_frequency: int
     alpha: float = 0.99
     beta: float = 0.01
-    avg_transition: bool = True
     averaged: bool = True
-    name: str = 'MR-NaS-PE'
+
+    @staticmethod
+    def name(cls: MRNaSPEConfig) -> str:
+        return f'{cls.policy_update_frequency}_{cls.averaged}'
 
 class MRNaSPE(Agent):
     """ MR-NaS-PE Algorithm """
 
-    def __init__(self, parameters: MRNaSPEParameters, policy: npt.NDArray[np.long], rewards: RewardSet):
-        self.alpha_exp = parameters.alpha
-        self.beta_exp = parameters.beta
-        super().__init__(parameters.agent_parameters, policy, rewards)
-        self.parameters = parameters
+    def __init__(self, cfg: MRNaSPEConfig, **kwargs):
+        self.alpha_exp = cfg.alpha
+        self.beta_exp = cfg.beta
+        super().__init__(**kwargs)
+        self.cfg = cfg
         self.uniform_policy = np.ones((self.ns, self.na)) / (self.ns * self.na)
         self.updates = 1
         assert 0 < self.alpha_exp + self.beta_exp <=1, "alpha+beta must be in (0,1]"
 
     @property
     def name(self) -> str:
-        transition = 'Avg. transition' if self.parameters.avg_transition else 'Sampled transition'
-        return f'MR-NaS-PE - (Averaged: {self.parameters.averaged} - {transition})'
+        return f'MR-NaS-PE - (Averaged: {self.cfg.averaged})'
  
     def suggested_exploration_parameter(self, dim_state: int, dim_action: int) -> float:
         return self.alpha_exp
@@ -60,21 +62,16 @@ class MRNaSPE(Agent):
         try:
             act =  np.random.choice(self.na, p=omega)
         except:
-            import pdb
-            pdb.set_trace()
-
+            raise Exception(f'Error, cant compute probability with {omega}')
         return act
     
     def process_experience(self, experience: Experience, step: int) -> None:
         s, a, sp = experience.s_t, experience.a_t,  experience.s_tp1
 
-        if step % self.parameters.period_computation_omega == 0:
+        if step % self.cfg.policy_update_frequency == 0:
             self.prev_omega = self.omega.copy()
             try:
-                if self.parameters.avg_transition:
-                    mdp = MDP(P=self.empirical_transition())
-                else:
-                    mdp = MDP(P=self.sample_transition())
+                mdp = MDP(P=self.empirical_transition())
                 results = self.solver.solve(self.discount_factor, mdp, self.policy.argmax(-1))
                 if results.w is None:
                     return
@@ -84,7 +81,7 @@ class MRNaSPE(Agent):
                 return
     
             omega = results.w
-            if self.parameters.averaged:
+            if self.cfg.averaged:
                 self.omega = ( self.updates * self.omega + omega) / (self.updates + 1)
             else:
                 self.omega = omega

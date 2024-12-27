@@ -3,7 +3,7 @@ import numpy.typing as npt
 from typing import NamedTuple, List, Tuple
 from enum import Enum
 from multireward_ope.tabular.envs.riverswim import RiverSwim
-from multireward_ope.tabular.reward_set import RewardSet, RewardSetBox, RewardSetCircle, \
+from multireward_ope.tabular.reward_set import RewardSet, RewardSetCircle, \
     RewardSetFinite, RewardSetPolytope, RewardSetRewardFree, RewardSetConfig
 from multireward_ope.tabular.envs.env import EnvParameters, EnvType
 from multireward_ope.tabular.policy import Policy

@@ -20,7 +20,7 @@ class CharacteristicTimeSolver(object):
     theta: cp.Variable
     KG: cp.Parameter
     e_i: cp.Parameter
-    MD_problem: cp.Problem
+    rho_problem: cp.Problem
     rewards: RewardSet
     solver: str
     vertices: npt.NDArray[np.float64]
@@ -47,9 +47,28 @@ class CharacteristicTimeSolver(object):
             rewards (RewardSet): Set of rewards considered
         """
         Ks = self.e_i.T @ self.KG @ self.theta
-        obj = cp.Maximize(cp.abs(Ks))
-        self.MD_problem = cp.Problem(obj, rewards.get_constraints(self.theta))
+
+
+        # obj = cp.Maximize(cp.abs(Ks))
+        # self.rho_problem = cp.Problem(obj, rewards.get_constraints(self.theta))
+
+        self.rho_problem = [
+            cp.Problem(cp.Maximize(Ks), rewards.get_constraints(self.theta)),
+            cp.Problem(cp.Maximize(-Ks), rewards.get_constraints(self.theta))]
         self.rewards = rewards
+
+    def _solve_rho(self, solver: str) -> float:
+        v, theta = 0,  None
+
+        # res = self.rho_problem.solve(method='dccp', solver = self.solver, ccp_times=5, max_iter=self.MAX_ITER)[0]
+        # return res
+        for prob in self.rho_problem:
+            vtemp = prob.solve(solver = solver)#, reoptimize=True)
+            if vtemp >= v:
+                v = vtemp
+                theta = self.theta.value
+        return v
+
 
     def solve(self,
               gamma: float, 
@@ -65,7 +84,7 @@ class CharacteristicTimeSolver(object):
         Returns:
             BoundResult: A tuple containing the value of the problem and the optimal solution
         """
-        if self.rewards.set_type == RewardSetType.FINITE or self.rewards.set_type == RewardSetType.POLYTOPE:
+        if self.rewards.set_type == RewardSetType.FINITE:
             return self._solve_finite(gamma, mdp, policy)
         elif self.rewards.set_type == RewardSetType.REWARD_FREE:
             return self._solve_rewardfree(gamma, mdp, policy)
@@ -102,7 +121,7 @@ class CharacteristicTimeSolver(object):
 
         
     def _solve(self, A: npt.NDArray[np.float64], gamma: float, mdp: MDP, policy: Policy):
-        normalization = 1 - gamma
+        normalization = (1 - gamma) ** 3
         omega = cp.Variable((self.dim_state, self.dim_actions), nonneg=True)
         if self.prev_omega is not None:
             omega.value = self.prev_omega
@@ -112,7 +131,7 @@ class CharacteristicTimeSolver(object):
             [cp.sum(omega[s]) == cp.sum(cp.multiply(mdp.P[:,:,s], omega)) for s in range(self.dim_state)])
     
         omega_pi = omega[np.arange(mdp.dim_state), policy]
-        obj = cp.multiply(A, cp.inv_pos(omega_pi)) * normalization
+        obj = cp.multiply(A* normalization, cp.inv_pos(omega_pi)) 
 
         obj = cp.Minimize(cp.max(obj))
         T_problem = cp.Problem(obj, constraints)
@@ -156,7 +175,7 @@ class CharacteristicTimeSolver(object):
                 self.KG.value = K[s] @ G
                 if self.prev_theta is not None:
                     self.theta.value = self.prev_theta[i,s]
-                res = self.MD_problem.solve(method='dccp', solver = self.solver, ccp_times=self.dim_state * 2, max_iter=self.MAX_ITER)[0]
+                res = self._solve_rho(solver = self.solver)
                 A[s,i] = res
                 if self.theta.value is not None:
                     self.prev_theta[i,s] = self.theta.value

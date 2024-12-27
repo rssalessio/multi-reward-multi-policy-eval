@@ -1,0 +1,4 @@
+type: 'GVFExplorer'
+parameters:
+  noise_parameter: 0.3
+  policy_update_frequency: 250

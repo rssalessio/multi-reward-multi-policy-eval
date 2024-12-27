@@ -1,11 +1,11 @@
 import seaborn as sns
 import matplotlib.pyplot as plt
 TITLE_SIZE = 18
-LEGEND_SIZE = 15
-TICK_SIZE = 15
+LEGEND_SIZE = 14
+TICK_SIZE = 14
 AXIS_TITLE = 18
-AXIS_LABEL = 15
-FONT_SIZE = 15
+AXIS_LABEL = 14
+FONT_SIZE = 14
 
 
 rc_parameters = {
@@ -29,3 +29,10 @@ plt.rcParams["text.latex.preamble"].join([
 ])
 
 sns.set_style("darkgrid", rc=rc_parameters)
+
+colors = [
+    '#f8766d',
+    '#00bfc4',
+    'mediumorchid',
+    '#3B3B3B'
+]

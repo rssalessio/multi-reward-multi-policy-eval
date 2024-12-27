@@ -3,71 +3,65 @@ import numpy as np
 import numpy.typing as npt
 from dataclasses import dataclass
 from multireward_ope.tabular.mdp import MDP
-from typing import Tuple, NamedTuple
+from typing import Tuple
 
 @dataclass
-class RiverSwimConfig(object):
-    num_states: int = 5
-    p_right: float = 0.3
+class NArmsConfig(object):
+    num_arms: int = 6
+    p0: float = 1.0
 
-    def build(self) -> RiverSwim:
-        return RiverSwim(self)
+    def build(self) -> NArms:
+        return NArms(self)
     
     @staticmethod
-    def name(cls: RiverSwimConfig) -> str:
-        return f'{cls.num_states}'
+    def name(cls: NArmsConfig) -> str:
+        return f'{cls.num_arms}'
 
 
+class NArms(MDP):
+    """NArms environment
 
-class RiverSwim(MDP):
-    """RiverSwim environment
-    @See also https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=1374179
+    This is an adaptation of the 6 arms environment
+    @See also https://www.sciencedirect.com/science/article/pii/S0022000008000767
+    An analysis of model-based Interval Estimation for Markov Decision Processes, Strehl & Littman, 2008
+
+    Probability of transitioning from 0 to i is 1 if i=1, otherwise it's p0 / i
+    Pr(i|i,a) = 1 if a >= i and Pr(0|i,a)=1 if a < 1
     """
     current_state: int                      # Current state
+    length: int                             # Chain length
+    p: float                                # Transition probability
+
     
     def __init__(self, 
-                 cfg: RiverSwimConfig):
-        """Initialize a river swim environment
+                 cfg: NArmsConfig):
+        """Initialize a double chain environment
 
         Parameters
         ----------
-        parameters : RiverSwimParameters
-            Parameters of the environment
-        """        
-        ns = cfg.num_states
-        na = 2
-
-        p_right = cfg.p_right
+        num_arms : int, optional
+            Number of arms, by default is 5
+        p0: float, optional
+            Transition probability coefficient, by default is 1
+        """
+        self.p0 = cfg.p0
+        ns = cfg.num_arms + 1
+        na = cfg.num_arms
     
         transitions = np.zeros((ns, na, ns))
         
         # Create transitions
-        y = (1 - p_right) * 6/7
+        for s in range(cfg.num_arms):
+            transitions[0, s, s+1] = 1 if s == 0 else self.p0 / (s + 1)
+            transitions[0, s, 0] = 1 - transitions[0, s, s+1]
 
-        for s in range(1, ns-1):
-            transitions[s, 1, s] = y
-            transitions[s, 1, s-1] = y / 6
-            transitions[s, 1, s+1] = p_right
-        transitions[1:-1, 0, 0:-2] = np.eye(ns-2)
+            transitions[s+1, s:, 0] = 1
+            transitions[s+1, :s, s+1] = 1
 
-        transitions[0, 0, 0] = 1
-        transitions[0, 1, 0] = 1-p_right
-        transitions[0, 1, 1] = p_right
-        transitions[-1, 1, -1] = p_right
-        transitions[-1, 1, -2] = 1-p_right
-        transitions[-1, 0, -2] = 1
-        
         super().__init__(transitions)
         # Reset environment
         self.reset()
 
-    def build_reward_matrix(self, min_reward: float = 0.05, max_reward: float = 1.0):
-        rewards = np.zeros((self.dim_state, self.dim_action))
-        
-        # Create rewards
-        rewards[0, 0] = min_reward
-        rewards[-1, 1] = max_reward
-        return rewards
     
     def reset(self) -> int:
         """Reset the current state
@@ -93,8 +87,7 @@ class RiverSwim(MDP):
         Tuple[int, float]
             Next state and reward
         """        
-        assert action == 0 or action == 1, 'Action needs to either 0 or 1'
-        
+        assert 0 <= action <= self.dim_action, 'Action needs to either 0 or 1'
         next_state = np.random.choice(self.dim_state, p=self.P[self.current_state, action])
         rew = None if reward is None else reward[self.current_state, action]
         self.current_state = next_state

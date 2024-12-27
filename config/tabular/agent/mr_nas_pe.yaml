@@ -1,0 +1,6 @@
+type: 'MR-NaS-PE'
+parameters:
+  policy_update_frequency: 500
+  alpha: 0.95
+  beta: 0.05
+  averaged: False

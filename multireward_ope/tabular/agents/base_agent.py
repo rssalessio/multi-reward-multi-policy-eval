@@ -13,16 +13,6 @@ class Experience(NamedTuple):
     a_t: int     # Action at time t
     s_tp1: int   # State at time t+1
 
-# Define a named tuple for agent parameters
-class AgentParameters(NamedTuple):
-    dim_state_space: int        # Dimension of state space
-    dim_action_space: int       # Dimension of action space
-    discount_factor: float      # Discount factor for future rewards
-    horizon: int                # Horizon (time steps) to plan ahead
-    frequency_evaluation: int   # How often to evaluate the transition function
-    delta: float                # confidence
-    epsilon: float              # accuracy
-    solver_type: str            # solver value
 
 # Define an abstract agent class
 class Agent(ABC):
@@ -41,27 +31,39 @@ class Agent(ABC):
     solver: CharacteristicTimeSolver
     policy: npt.NDArray[np.long]
     solver_type: str
+    rewards: RewardSet
 
     # Initialize the agent with agent parameters
-    def __init__(self, agent_parameters: AgentParameters,  policy: npt.NDArray[np.long], rewards: RewardSet):
-        self.dim_state_space = agent_parameters.dim_state_space
-        self.dim_action_space = agent_parameters.dim_action_space
-        self.discount_factor = agent_parameters.discount_factor
+    def __init__(self,
+                 dim_state: int,
+                 dim_action: int,
+                 discount_factor: float,
+                 horizon: int,
+                 frequency_evaluation: int,
+                 delta: float,
+                 epsilon: float,
+                 policy: npt.NDArray[np.long],
+                 rewards: RewardSet,
+                 solver_type: str, **kwargs):
+        self.rewards = rewards
+        self.dim_state_space = dim_state
+        self.dim_action_space = dim_action
+        self.discount_factor = discount_factor
         self.exp_visits = np.zeros((self.ns, self.na, self.ns), order='C')
         self.state_action_visits = np.zeros((self.ns, self.na), order='C')
         self.total_state_visits = np.zeros((self.ns), order='C')
         self.last_visit = np.zeros((self.ns), order='C')
         self.omega = np.ones((self.ns, self.na), order='C')
         self.exploration_parameter = self.suggested_exploration_parameter(self.ns, self.na)
-        self.horizon = agent_parameters.horizon
-        self.frequency_evaluation = agent_parameters.frequency_evaluation
-        self.delta = agent_parameters.delta
-        self.solver_type = agent_parameters.solver_type
+        self.horizon = horizon
+        self.frequency_evaluation = frequency_evaluation
+        self.delta = delta
+        self.solver_type = solver_type
         self.solver = CharacteristicTimeSolver(self.ns, self.na, solver=self.solver_type)
         self.solver.build_problem(rewards)
         self.policy = np.zeros((self.ns, self.na))
         self.policy[np.arange(self.ns), policy] = 1.
-        self.epsilon = agent_parameters.epsilon
+        self.epsilon = epsilon
 
     @property
     @abstractmethod
