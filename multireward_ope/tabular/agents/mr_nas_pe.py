@@ -35,7 +35,8 @@ class MRNaSPE(Agent):
 
     @property
     def name(self) -> str:
-        return f'MR-NaS-PE - (Averaged: {self.cfg.averaged})'
+        return  f'MR-NaS-PE'
+    
  
     def suggested_exploration_parameter(self, dim_state: int, dim_action: int) -> float:
         return self.alpha_exp

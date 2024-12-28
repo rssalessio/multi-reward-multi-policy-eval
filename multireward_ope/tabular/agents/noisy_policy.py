@@ -19,7 +19,6 @@ class NoisyPolicyParameters:
     def name(cls: NoisyPolicyParameters) -> str:
         return f'{cls.noise_type}_{cls.noise_parameter}'
 
-
     
 class NoisyPolicy(Agent):
     """ NoisyPolicy Algorithm """
@@ -32,7 +31,7 @@ class NoisyPolicy(Agent):
     
     @property
     def name(self) -> str:
-        return f'Noisy policy ({self.parameters.noise_type.__str__()})'
+        return f'Noisy Policy ({self.parameters.noise_type})'
     
     def forward(self, state: int, step: int) -> int:
         alpha = self.suggested_exploration_parameter(self.dim_state_space, self.dim_action_space)

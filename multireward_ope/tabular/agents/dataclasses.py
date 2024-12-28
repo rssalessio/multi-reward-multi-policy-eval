@@ -17,6 +17,7 @@ class AgentParameters:
     parameters: NoisyPolicyParameters | GVFExplorerConfig | MRNaSPEConfig
 
 
+
     @staticmethod
     def name(cls: AgentParameters) -> str:
         match cls.type:
@@ -29,3 +30,13 @@ class AgentParameters:
             case _:
                 raise Exception(f'Type {cls.type} not found')
         return f'{cls.type}_{params}'
+
+    @staticmethod
+    def short_name(cls: AgentParameters) -> str:
+        match cls.type:
+            case AgentType.NOISY_POLICY:
+                return f'{cls.type} ({cls.parameters.noise_type})'
+            case AgentType.MR_NAS_PE:
+                return 'MR-NaS'
+            case _:
+                raise Exception(f'Type {cls.type} not found')
