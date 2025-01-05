@@ -1,0 +1,17 @@
+type: 'DBMR-PE'
+parameters:
+    ensemble_size: 2
+    hidden_layer_size: 256
+    batch_size: 128
+    discount: 0.9
+    replay_capacity: 100000
+    min_replay_size: 2048
+    sgd_period: 1
+    target_soft_update: 0.01
+    lr_Q: 0.002
+    lr_M: 0.001
+    noise_scale: 0
+    prior_scale: 2.
+    epsilon_0: 10
+    exploration_prob: 0.
+    quantile: 0.9

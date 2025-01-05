@@ -7,13 +7,12 @@ from numpy.typing import NDArray
 from typing import Tuple, NamedTuple, Optional, Dict
 from dataclasses import dataclass
 
-from agents.utils import TimeStep
+from multireward_ope.continuous.agents.utils.utils import TimeStep
 
 @dataclass
 class DeepSeaConfig(object):
     size: int = 10
     slipping_probability: float = 0.05
-    randomize: bool = True
 
     def build(self) -> DeepSea:
         return DeepSea(self)
@@ -30,27 +29,21 @@ class DeepSea(object):
         self._cfg = cfg
         self._size = cfg.size
         self._slipping_probability = cfg.slipping_probability
-        self.base_rewards = np.zeros((cfg.size, cfg.size, cfg.size))
-        self.base_rewards[:,-1,:] = np.eye(cfg.size)
+        self._base_rewards = np.zeros((cfg.size, cfg.size, cfg.size))
+        self._base_rewards[:,-1,:] = np.eye(cfg.size)
 
-        self.random_rewards = None
-        self.rewards = self.base_rewards
-        self.num_base_rewards = cfg.size
-        self.num_rewards = cfg.size
+        self._rewards = self._base_rewards
+        self._num_base_rewards = cfg.size
+        self._num_rewards = cfg.size
 
         self._column = 0
         self._row = 0
 
         self.visits = np.zeros((cfg.size, cfg.size))
         
-
-        if cfg.randomize:
-            self._action_mapping = np.random.binomial(1, 0.5, cfg.size)
-        else:
-            self._action_mapping = np.ones(cfg.size)
+        self._action_mapping = np.ones(cfg.size)
 
         self._done = False
-
 
     def compute_Q_values(self, rewards: NDArray[np.float32], gamma: float):
         Q = np.zeros((rewards.shape[0], self._size, self._size, 2))
@@ -74,6 +67,8 @@ class DeepSea(object):
 
     def step(self, action: int) -> Tuple[TimeStep, Dict]:
         _current_observation = self._get_observation(self._row, self._column)
+        eval_pol_action = self.eval_policy_action(_current_observation)
+        
         
         if np.random.uniform() < self._slipping_probability:
             action = int(not action)
@@ -100,16 +95,19 @@ class DeepSea(object):
         rewards = self.compute_rewards()
         self.visits[self._row, self._column] += 1
         observation = self._get_observation(self._row, self._column)
-        return TimeStep(_current_observation, action, rewards, done, observation), {}
+        eval_pol_next_action = self.eval_policy_action(observation)
+        return TimeStep(_current_observation, action, rewards, done, observation, eval_pol_action, eval_pol_next_action, False), {}
 
-    def reset(self) -> NDArray[np.float32]:
+    def reset(self) -> TimeStep:
         self._done = False
         self._column = 0
         self._row = 0
         observation = self._get_observation(self._row, self._column)
         self.visits[self._row, self._column] += 1
+
+        eval_pol_action = self.eval_policy_action(observation)
         
-        return observation
+        return TimeStep(observation, None, None, False, None, eval_pol_action, None, True)
 
     def _get_observation(self, row: int, column: int) -> NDArray[np.float32]:
         observation = np.zeros(shape=(self._size, self._size), dtype=np.float32)
@@ -125,7 +123,26 @@ class DeepSea(object):
     def num_actions(self) -> int:
         return 2
 
+    @property
+    def num_rewards(self) -> int:
+        return self._num_rewards
+    
+    @property
+    def dim_state(self) -> int:
+        return np.prod(self.obs_shape)
+
+    @property
+    def horizon(self) -> int:
+        return self._cfg.size
+
+    @property
+    def default_policy(self) -> NDArray[np.long]:
+        return np.ones(self.dim_state, dtype=np.long)
+    
     def compute_rewards(self) -> NDArray[np.float64]:
-        return self.rewards[:, self._row, self._column]
+        return self._rewards[:, self._row, self._column]
+
+    def eval_policy_action(self, observation: NDArray[np.float64]):
+        return 1
 
 

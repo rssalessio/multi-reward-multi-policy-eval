@@ -12,6 +12,8 @@ NumpyRewards = NDArray[np.float64]
 class TransitionWithMaskAndNoise(NamedTuple):
     o_tm1: NumpyObservation
     a_tm1: int
+    a_pi_tm1: int
+    a_pi_t: int
     r_t: NumpyRewards
     d_t: float
     o_t: NumpyObservation
@@ -24,6 +26,9 @@ class TimeStep(NamedTuple):
     rewards: NumpyRewards
     done: bool | float
     next_observation: NumpyObservation
+    eval_policy_action: int | float
+    eval_policy_next_action: int | float
+    start: bool
 
     def to_float32(self) -> TimeStep:
         return TimeStep(
@@ -31,12 +36,17 @@ class TimeStep(NamedTuple):
             np.float32(self.action),
             np.float32(self.rewards),
             np.float32(self.done),
-            np.float32(self.next_observation)
+            np.float32(self.next_observation),
+            np.float32(self.eval_policy_action),
+            np.float32(self.eval_policy_next_action),
+            np.float32(self.start)
         )
 
 class TorchTransitions(NamedTuple):
     o_tm1: torch.Tensor
     a_tm1: torch.Tensor
+    a_pi_tm1: int
+    a_pi_t: int
     r_t: torch.Tensor
     d_t: torch.Tensor
     o_t: torch.Tensor
@@ -46,33 +56,39 @@ class TorchTransitions(NamedTuple):
     @staticmethod
     def from_minibatch(batch: Sequence[NDArray], device: torch.device, num_rewards: int) -> TorchTransitions:
         if len(batch) == 5:
-            o_tm1, a_tm1, r_t, d_t, o_t = batch
+            o_tm1, a_tm1, a_pi_tm1, a_pi_t, r_t, d_t, o_t = batch
             m_t, z_t = None, None
         else:
-            o_tm1, a_tm1, r_t, d_t, o_t, m_t, z_t = batch
+            o_tm1, a_tm1, a_pi_tm1, a_pi_t, r_t, d_t, o_t, m_t, z_t = batch
             m_t = torch.tensor(m_t, dtype=torch.float32, requires_grad=False, device=device)
             z_t = torch.tensor(z_t, dtype=torch.float32, requires_grad=False, device=device)
 
 
         a_tm1 = torch.tensor(a_tm1, dtype=torch.int64, requires_grad=False, device=device)
+        a_pi_tm1 = torch.tensor(a_pi_tm1, dtype=torch.int64, requires_grad=False, device=device)
+        a_pi_t = torch.tensor(a_pi_t, dtype=torch.int64, requires_grad=False, device=device)
         r_t = torch.tensor(r_t[:, :num_rewards], dtype=torch.float32, requires_grad=False, device=device)
         d_t = torch.tensor(d_t, dtype=torch.float32, requires_grad=False, device=device)
         o_tm1 = torch.tensor(o_tm1, dtype=torch.float32, requires_grad=False, device=device)
         o_t = torch.tensor(o_t, dtype=torch.float32, requires_grad=False, device=device)
         
 
-        return TorchTransitions(o_tm1, a_tm1, r_t, d_t, o_t, m_t, z_t)
+        return TorchTransitions(o_tm1, a_tm1, a_pi_tm1, a_pi_t, r_t, d_t, o_t, m_t, z_t)
     
     def expand_batch(self, ensemble_size: int, num_rewards: int) -> TorchTransitions:
         r_t = self.r_t.unsqueeze(1)
         d_t = self.d_t[..., None, None]
-        z_t = self.z_t.unsqueeze(-1)
+        z_t = self.z_t#.unsqueeze(-1)
         m_t = self.m_t.unsqueeze(-1)
 
         a_tm1 = self.a_tm1[..., None, None, None].expand(
                 -1, ensemble_size, num_rewards, 1)
+        a_pi_tm1 = self.a_pi_tm1[..., None, None, None].expand(
+                -1, ensemble_size, num_rewards, 1)
+        a_pi_t = self.a_pi_t[..., None, None, None].expand(
+                -1, ensemble_size, num_rewards, 1)
         
-        return TorchTransitions(self.o_tm1, a_tm1, r_t, d_t, self.o_t, m_t, z_t)
+        return TorchTransitions(self.o_tm1, a_tm1, a_pi_tm1, a_pi_t, r_t, d_t, self.o_t, m_t, z_t)
 
 def expand_obs_with_rewards(obs: torch.Tensor, rewards: torch.Tensor) -> torch.Tensor:
     assert rewards.shape[0] == rewards.shape[1], 'Rewards must be a square matrix'

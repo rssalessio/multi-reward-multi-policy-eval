@@ -3,7 +3,7 @@ import torch.nn as nn
 import numpy as np
 from numpy.typing import NDArray
 from multireward_ope.continuous.agents.utils.base_networks import BaseNetwork
-from agents.utils import weight_init
+from multireward_ope.continuous.agents.utils.utils import weight_init
 from multireward_ope.continuous.agents.utils.ensemble_linear_layer import EnsembleLinear
 from typing import NamedTuple
 from functools import partial
@@ -13,11 +13,12 @@ class Values(NamedTuple):
     """ Contains the Q-values and the M-values"""
     q_values: torch.Tensor
     m_values: torch.Tensor
+    q_values_sn: torch.Tensor
 
 def make_single_network(input_size: int, output_size: int, hidden_size: int, ensemble_size: int, final_activation = nn.ReLU) -> nn.Module:
     """ Create a single network """
     net = [
-        EnsembleLinear(input_size, hidden_size, ensemble_size) if ensemble_size > 1 else nn.Linear(input_size, hidden_size),
+        EnsembleLinear(hidden_size, hidden_size, ensemble_size) if ensemble_size > 1 else nn.Linear(input_size, hidden_size),
         nn.ReLU(),
         EnsembleLinear(hidden_size, hidden_size, ensemble_size) if ensemble_size > 1 else nn.Linear(hidden_size, hidden_size),
         nn.ReLU(),
@@ -29,8 +30,8 @@ def make_single_network(input_size: int, output_size: int, hidden_size: int, ens
 
 
 class EnsembleSingleNetwork(BaseNetwork):
-    def __init__(self, state_dim: int, num_rewards: int, num_actions: int, hidden_size: int, ensemble_size: int, final_activation: nn.Module, device: torch.device, generator: torch.Generator):
-        super().__init__(device, generator)
+    def __init__(self, state_dim: int, num_rewards: int, num_actions: int, hidden_size: int, ensemble_size: int, final_activation: nn.Module, device: torch.device):
+        super().__init__(device)
         self.num_rewards = num_rewards
         self.ensemble_size = ensemble_size
         self.num_actions = num_actions
@@ -57,11 +58,11 @@ class EnsembleSingleNetwork(BaseNetwork):
 
 class EnsembleWithPrior(BaseNetwork):
     def __init__(self, state_dim: int, num_rewards: int, num_actions: int, prior_scale: float,
-                 ensemble_size: int, hidden_size: int, final_activation: nn.Module, device: torch.device, generator: torch.Generator):
-        super().__init__(device, generator)
+                 ensemble_size: int, hidden_size: int, final_activation: nn.Module, device: torch.device):
+        super().__init__(device)
         self.ensemble_size = ensemble_size
-        self._network = EnsembleSingleNetwork(state_dim, num_rewards, num_actions, hidden_size, ensemble_size, final_activation, device, generator)
-        self._prior_network = EnsembleSingleNetwork(state_dim, num_rewards, num_actions, hidden_size, ensemble_size, final_activation, device, generator)
+        self._network = EnsembleSingleNetwork(state_dim, num_rewards, num_actions, hidden_size, ensemble_size, final_activation, device)
+        self._prior_network = EnsembleSingleNetwork(state_dim, num_rewards, num_actions, hidden_size, ensemble_size, final_activation, device)
         self._prior_scale = prior_scale
 
         # Freeze training of the prior network
@@ -94,25 +95,41 @@ class EnsembleWithPrior(BaseNetwork):
 
 
 class ValueEnsembleWithPrior(BaseNetwork):
-    def __init__(self, state_dim: int, num_rewards: int, num_actions: int, prior_scale: float, ensemble_size: int, hidden_size: int, device: torch.device, generator: torch.Generator):
-        super().__init__(device, generator)
+    def __init__(self, state_dim: int, num_rewards: int, num_actions: int, prior_scale: float, ensemble_size: int, hidden_size: int, device: torch.device):
+        super().__init__(device)
         self.num_rewards = num_rewards
         self.ensemble_size = ensemble_size
+        self.num_actions = num_actions
+        self.embed1 = torch.nn.Embedding(state_dim, hidden_size)
+        self.embed2 = torch.nn.Embedding(state_dim, hidden_size)
+        self.embed3 = torch.nn.Embedding(state_dim, hidden_size)
         self._q_network = EnsembleWithPrior(state_dim, num_rewards, num_actions, prior_scale=prior_scale, ensemble_size=ensemble_size,
-                                            hidden_size=hidden_size, final_activation=None, device=device, generator=generator)
+                                            hidden_size=hidden_size, final_activation=None, device=device)
         self._m_network = EnsembleWithPrior(state_dim, num_rewards, num_actions, prior_scale=prior_scale, ensemble_size=ensemble_size,
-                                            hidden_size=hidden_size, final_activation=nn.ReLU, device=device, generator=generator)
+                                            hidden_size=hidden_size, final_activation=nn.Softplus, device=device)
         
+        self._q_network_sn = nn.Sequential(nn.Linear(hidden_size, hidden_size),
+                                           nn.ReLU(),
+                                           nn.Linear(hidden_size, hidden_size),
+                                           nn.ReLU(),
+                                           nn.Linear(hidden_size, num_actions * num_rewards))
         def init_weights(m):
             if isinstance(m, EnsembleLinear):
                 stddev = 1 / np.sqrt(m.weight.shape[1])
-                torch.nn.init.trunc_normal_(m.weight, mean=0, std=stddev, a=-2*stddev, b=2*stddev, generator=generator)
+                torch.nn.init.trunc_normal_(m.weight, mean=0, std=stddev, a=-2*stddev, b=2*stddev)
                 torch.nn.init.zeros_(m.bias.data)
         
         self.to(device).apply(init_weights)
 
     
     def forward(self, x: torch.Tensor) -> Values:
-        q = self._q_network.forward(x)
-        m = self._m_network.forward(x)
-        return Values(q, m)
+        # import pdb
+        # pdb.set_trace()
+        y=x.max(-1)[0].long()
+        embed1 = self.embed1(y)
+        # embed2 = self.embed2(y)
+        # embed3 = self.embed3(y)
+        q = self._q_network.forward(embed1)
+        m = self._m_network.forward(embed1)
+        qsn = self._q_network_sn.forward(embed1).view(-1, self.num_rewards, self.num_actions)
+        return Values(q, m, qsn)

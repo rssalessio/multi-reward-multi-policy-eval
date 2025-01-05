@@ -1,3 +1,4 @@
 type: 'ForkedRiverswim'
 parameters:
   river_length: 5
+  p_right: 0.7

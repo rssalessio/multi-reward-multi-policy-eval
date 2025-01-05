@@ -1,3 +1,4 @@
+from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
@@ -13,13 +14,12 @@ class DBMRPEConfig:
     target_soft_update: float = 1e-2
     lr_Q: float = 1e-4
     lr_M: float = 1e-5
-    mask_prob: float = 0.7
     noise_scale: float = 0
-    delta_min: float = 1e-9
-    kbar: float = 1.
     prior_scale: float = 5
     epsilon_0: float = 10
     exploration_prob: float = 0.
-    enable_mix: bool = True
-    per_step_randomization: bool = True
-    lr_delta_min: Tuple[float, float] = (-6, -3)
+    quantile: float = 0.9
+
+    @staticmethod
+    def name(cls: DBMRPEConfig) -> str:
+        return ''

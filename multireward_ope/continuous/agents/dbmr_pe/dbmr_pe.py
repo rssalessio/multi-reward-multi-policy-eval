@@ -5,16 +5,12 @@ import lzma
 import pickle
 import torch
 from numpy.typing import NDArray
-from multireward_ope.continuous.agents.agent import Agent, EnvConfig
+from multireward_ope.continuous.agents.agent import Agent
 from multireward_ope.continuous.agents.utils.utils import TimeStep, TransitionWithMaskAndNoise, \
     TorchTransitions
 from multireward_ope.continuous.agents.dbmr_pe.config import DBMRPEConfig
 from multireward_ope.continuous.agents.dbmr_pe.networks import ValueEnsembleWithPrior
-
-
-golden_ratio = (1+np.sqrt(5))/2
-golden_ratio_sq = golden_ratio ** 2
-
+from multireward_ope.tabular.utils import policy_evaluation
 
 class DBMRPE(Agent):
     NAME = 'DBMR-PE'
@@ -24,15 +20,17 @@ class DBMRPE(Agent):
             state_dim: int,
             num_actions: int,
             num_rewards: int,
+            horizon: int,
             config: DBMRPEConfig,
             device: torch.device):
-        super().__init__(config.epsilon_0, config.replay_capacity, device)
+        super().__init__(config.epsilon_0, config.replay_capacity, horizon, device)
 
         # Agent components.
         self._state_dim = state_dim
         self._num_actions = num_actions
         self._num_rewards = num_rewards
         self._cfg = config
+        self.mdp_visitation = np.ones((state_dim, num_actions, state_dim))
         self._reward_vectors = torch.eye(self._num_rewards).to(device)
         self._ensemble = ValueEnsembleWithPrior(self._state_dim,
                                                 self._num_rewards,
@@ -40,182 +38,173 @@ class DBMRPE(Agent):
                                                 self._cfg.prior_scale,
                                                 self._cfg.ensemble_size,
                                                 self._cfg.hidden_layer_size,
-                                                device,
-                                                self._torch_rng)
+                                                device)
         self._tgt_ensemble: ValueEnsembleWithPrior = ValueEnsembleWithPrior(self._state_dim,
                                                 self._num_rewards,
                                                 self._num_actions, 
                                                 self._cfg.prior_scale,
                                                 self._cfg.ensemble_size,
                                                 self._cfg.hidden_layer_size,
-                                                device,
-                                                self._torch_rng).clone(self._ensemble).freeze()
+                                                device).clone(self._ensemble).freeze()
 
-        self._optimizer = torch.optim.Adam(
+        self._optimizer = torch.optim.AdamW(
             [
                 {"params": self._ensemble._q_network.parameters(), "lr": config.lr_Q},
+                {"params": self._ensemble._q_network_sn.parameters(), "lr": config.lr_Q},
                 {"params": self._ensemble._m_network.parameters(), "lr": config.lr_M}
             ])
 
         # Agent state.
         self._total_steps = 0
-        self._active_reward = 0
-        self._chosen_rewards = np.zeros(self._num_rewards)
-        self._chosen_rewards[self._active_reward] = 1
     
-        self._delta_min = torch.nn.Parameter(torch.zeros(self._num_rewards, device=device), requires_grad=True)
-        
-        self._avg_delta_min = np.zeros(self._num_rewards)
-        self._delta_min_optim = torch.optim.NAdam([self._delta_min], lr=1e-3)
-        self.uniform_number = self._np_rng.uniform()
         self._gradient_steps = 0
         self._start = True
 
-        self._history_chosen_rewards = []
-        self._history_delta_min = []
 
-    def _gradient_step(self, batch: TorchTransitions):
+    def _gradient_step(self, batch: TorchTransitions):#, idxs, weights):
         """Does a step of SGD for the whole ensemble over `transitions`."""
         
         _batch = batch.expand_batch(self._cfg.ensemble_size, self._num_rewards)
         m_t = _batch.m_t
-        if self._cfg.enable_mix:
-            m_t = self._np_rng.binomial(1, self._cfg.mask_prob, (self._cfg.batch_size, self._cfg.ensemble_size)).astype(np.float32)[..., None]
-            m_t = torch.tensor(m_t, device=self._device, dtype=torch.float64)
+
+
+        # m_t = np.random.binomial(1, 0.7, (self._cfg.batch_size, self._cfg.ensemble_size)).astype(np.float32)[..., None]
+        # m_t = torch.tensor(m_t, device=self._device, dtype=torch.float64)
+ 
     
         with torch.no_grad():
-            q_values_target = self._tgt_ensemble.forward(_batch.o_t).q_values
-            next_actions = self._ensemble.forward(_batch.o_t).q_values.max(-1)[1]
-            q_target = q_values_target.gather(-1, next_actions.unsqueeze(-1)).squeeze(-1)
-            target_q = _batch.r_t + _batch.z_t + self._cfg.discount * (1-_batch.d_t) * q_target
+            tgt_values_t= self._tgt_ensemble.forward(_batch.o_t)
+            tgt_values_tm1 = self._tgt_ensemble.forward(_batch.o_tm1)
+
+            q_next_target = tgt_values_t.q_values.gather(-1, _batch.a_pi_t).squeeze(-1)
+            target_q = _batch.r_t + _batch.z_t + self._cfg.discount * (1-_batch.d_t) * q_next_target
             
-            values_tgt = self._tgt_ensemble.forward(_batch.o_tm1).q_values
-            q_values_tgt = values_tgt.gather(-1, _batch.a_tm1).squeeze(-1)
-            M = (_batch.r_t + _batch.z_t + (1-_batch.d_t) * self._cfg.discount * q_target - q_values_tgt.detach()) / (self._cfg.discount)
-            target_M = (M ** (2 ** self._cfg.kbar)).detach()
+            q_next_target_sn = tgt_values_t.q_values_sn.gather(-1, _batch.a_pi_t[:,0]).squeeze(-1)
+            target_q_sn = _batch.r_t[:,0] + self._cfg.discount * (1-_batch.d_t[:,0]) * q_next_target_sn
+     
+            
+            q_values_tgt = tgt_values_tm1.q_values.gather(-1, _batch.a_tm1).squeeze(-1)
+            M = (_batch.r_t + _batch.z_t + (1-_batch.d_t) * self._cfg.discount * q_next_target - q_values_tgt.detach()) / (self._cfg.discount)
+            target_M = (M ** 2).detach()
     
         values = self._ensemble.forward(_batch.o_tm1)
         q_values = values.q_values.gather(-1, _batch.a_tm1).squeeze(-1)
-      
-        q_loss =   torch.mul(torch.square(q_values - target_q.detach()),  m_t).mean()
+        q_values_sn = values.q_values_sn.gather(-1, _batch.a_tm1[:,0]).squeeze(-1)
+        
+        # if np.random.uniform() < 1e-3:
+        #     import pdb
+        #     pdb.set_trace()
+        #_m_t=np.random.exponential(1, size=m_t.shape)
+        #m_t = torch.tensor(_m_t, dtype=torch.float32, device=m_t.device)
+        # if np.random.rand() < 1e-3:
+        #     import pdb
+        #     pdb.set_trace()
+        #weights = torch.tensor(weights, dtype=torch.float32, device=q_values.device, requires_grad=False).unsqueeze(-1).unsqueeze(-1)
+
+        q_loss =   torch.mul(torch.square(q_values - target_q.detach()),  m_t).sum(-1).sum(-1).mean()
         
         m_values = values.m_values.gather(-1, _batch.a_tm1).squeeze(-1)
 
-        m_loss =   torch.mul(torch.square(m_values - target_M.detach()), m_t).mean()
-        total_loss =q_loss + m_loss
+        m_loss =   torch.mul(torch.square(m_values - target_M.detach()), m_t).sum(-1).sum(-1).mean()
+
+        tderr = q_values_sn - target_q_sn.detach()
+        qsn_loss = ( torch.square(tderr).sum(-1)).mean()
+
+        # if torch.any(_batch.r_t > 0):
+        #     import pdb
+        #     pdb.set_trace()
+
+        total_loss =q_loss + m_loss +qsn_loss
         self._optimizer.zero_grad()
         total_loss.backward()
         self._optimizer.step()
         
         self._gradient_steps += 1
+
+        # if self._gradient_steps % 32 == 0:
+        #     self._tgt_ensemble = self._tgt_ensemble.clone(self._ensemble)
         
         self._tgt_ensemble.soft_update(self._ensemble, self._cfg.target_soft_update)
+        #self.buffer.update_priorities(idxs, tderr.abs().max(-1)[0].detach().cpu().numpy() + 1e-5)
 
-    
-        with torch.no_grad():
-            q_target = self._ensemble.forward(_batch.o_tm1).q_values
-            esitm = (-q_target.topk(2)[0].diff(dim=-1).squeeze(-1))#.cpu().numpy()
-            estim_delta_min = esitm.min(1)[0].mean(0).detach()#np.quantile(esitm, q=0.25, axis=1).mean(0)
-            
-        for g in self._delta_min_optim.param_groups:
-            g['lr'] = 10 ** np.random.uniform(*self._cfg.lr_delta_min)
-
-        loss_min = torch.nn.functional.huber_loss(self._delta_min, estim_delta_min)
-        self._delta_min_optim.zero_grad()
-        loss_min.backward()
-        self._delta_min_optim.step()
-    
-        n = self._gradient_steps
-        x = self._delta_min.detach().cpu().numpy()
-        self._avg_delta_min =((n - 1) * self._avg_delta_min / n) + (x / n)
-        self._history_delta_min.append(x.copy())
 
         return total_loss.item()
-    
+
     @torch.no_grad()
-    def _select_action(self, observation: NDArray[np.float32]) -> int:
-        if self._np_rng.rand() < self.eps_fn(self._gradient_steps):
-            self._start = False
-            return self._np_rng.randint(self._num_actions)
-
-        if self._cfg.per_step_randomization:
-            self.uniform_number = self._np_rng.uniform()
-
-        observation = torch.tensor(observation[None, ...], dtype=torch.float32, device=self._device)
-        values  = self._ensemble.forward(observation)
+    def qvalues(self, observation: TimeStep) -> np.ndarray:
+        th_observation = torch.tensor(observation.observation[None, ...], dtype=torch.float32, device=self._device)
+        values  = self._ensemble.forward(th_observation)
         
         # Size (1, ensemble size, num rewards, actions) -> (ensemble size, num_rewards, actions)
-        q_values = values.q_values.cpu().numpy().astype(np.float64)[0]
-        m_values = values.m_values.cpu().numpy().astype(np.float64)[0]
-        
-        if self._start:
-            self.uniform_number = self._np_rng.uniform()
-            t = self._chosen_rewards.sum()
-            delta = np.sqrt(t) - self._num_rewards / 2
-            if np.any(self._chosen_rewards - delta < 0):
-                self._active_reward = np.argmin(self._chosen_rewards)
-            elif self._np_rng.rand() < self._cfg.exploration_prob:
-                self._active_reward = self._np_rng.randint(self._num_rewards)
-            else:
-                weight = 1/ (1e-6+self._avg_delta_min) ** 2
-                weight = weight/weight.sum()
-                self._active_reward = self._np_rng.choice(self._num_rewards, p=weight)
-            self._chosen_rewards[self._active_reward] += 1
-            self._history_chosen_rewards.append(self._active_reward)
-            self._start = False
+        q_values = values.q_values_sn[0].cpu().numpy()
+        return q_values
+
     
-        q_values = np.quantile(q_values[:, self._active_reward], self.uniform_number, axis=0, keepdims=False)
-        m_values = np.quantile(m_values[:, self._active_reward], self.uniform_number, axis=0, keepdims=False)** (2 ** (1- self._cfg.kbar))
-        q_values_max = q_values.max(-1)
-        mask = np.isclose(q_values- q_values_max, 0)
-
-        if len(q_values[~mask]) == 0:
-            return self._np_rng.choice(self._num_actions)
-        delta = q_values.max() - q_values
-        delta[mask] = self._avg_delta_min[self._active_reward] * ((1 - self._cfg.discount)) / (1 + self._cfg.discount)
+    @torch.no_grad()
+    def _select_action(self, obs: TimeStep) -> int:
+        if np.random.rand() < self.eps_fn(self._gradient_steps):
+            self._start = False
+            return np.random.choice(self._num_actions)
 
 
-        Hsa = (2 + 8 * golden_ratio_sq * m_values) / np.clip((delta ** 2), 1e-16, np.inf)
-        if np.any(np.isnan(Hsa)):
-            return self._np_rng.choice(self._num_actions)
-
-        C = np.max(np.maximum(4, 16 * (self._cfg.discount ** 2) * golden_ratio_sq * m_values[mask]))
-        Hopt = C / (delta[mask] ** 2)
-
-        Hsa[mask] = np.sqrt(  Hopt * Hsa[~mask].sum(-1)* 2 / (self._state_dim * (1 - self._cfg.discount)))
-        H = Hsa * 1e-14
-        p = (H/H.sum(-1, keepdims=True))
+        th_observation = torch.tensor(obs.observation[None, ...], dtype=torch.float32, device=self._device)
+        values  = self._ensemble.forward(th_observation)
         
-        if np.any(np.isnan(p)):
-            return self._np_rng.choice(self._num_actions)
+        # Size (1, ensemble size, num rewards, actions) -> (ensemble size, num_rewards, actions)
+        q_values = values.q_values[0]#.cpu().numpy().astype(np.float64)[0]
+        m_values = values.m_values[0]#.cpu().numpy().astype(np.float64)[0]
+        # if np.random.rand() < 1e-3:
+        #     import pdb
+        #     pdb.set_trace()
+        #     print(m_values.mean(0))
+        
+        one_hot = torch.nn.functional.one_hot(torch.tensor(obs.eval_policy_action), self._num_actions).float()
+        softmaxed = torch.nn.functional.softmax(one_hot / m_values.std(0).max() )
+    
+        q_values = torch.quantile(q_values, self._cfg.quantile, dim=0, keepdim=False)
+        m_values = torch.quantile(m_values, self._cfg.quantile, dim=0, keepdim=False) 
+        
+        lse_m_values = softmaxed * torch.logsumexp(m_values, dim=0)
+        probs = lse_m_values / lse_m_values.sum()
+        return torch.multinomial(probs, 1, replacement=True).item()
+        # q_values_max = q_values.max(-1)
+        # mask = np.isclose(q_values- q_values_max, 0)
 
-        return self._np_rng.choice(self._num_actions, p=p)
+        # if len(q_values[~mask]) == 0:
+        #     return np.random.choice(self._num_actions)
+       
+        
+        # if np.any(np.isnan(p)):
+        #     return np.random.choice(self._num_actions)
 
-    def select_action(self, observation: NDArray[np.float32], step: int) -> int:
+        # return np.random.choice(self._num_actions, p=p)
+
+    def select_action(self, observation: TimeStep, step: int) -> int:
         return self._select_action(observation)
 
-    def select_greedy_action(self, observation: NDArray[np.float32]) -> int:
+    def select_greedy_action(self, observation: TimeStep) -> int:
         return self._select_action(observation, greedy=True)
     
     def update(self, timestep: TimeStep) -> None:
         """Update the agent: add transition to replay and periodically do SGD."""
         self._total_steps += 1
 
-        if timestep.done:
-            self.uniform_number = self._np_rng.uniform()
-            self._start = True
+        self.mdp_visitation[timestep.observation.argmax(), timestep.action, timestep.next_observation.argmax()] += 1
 
         timestep = timestep.to_float32()
         self._replay.add(
             TransitionWithMaskAndNoise(
                 o_tm1=timestep.observation,
                 a_tm1=timestep.action,
+                a_pi_tm1=timestep.eval_policy_action,
+                a_pi_t=timestep.eval_policy_next_action,
                 r_t=timestep.rewards,
                 d_t=timestep.done,
                 o_t=timestep.next_observation,
-                m_t=self._np_rng.binomial(1, self._cfg.mask_prob,
+                m_t=np.random.binomial(1, 0.7,
                                     self._cfg.ensemble_size).astype(np.float32),
-                z_t=self._np_rng.randn(self._cfg.ensemble_size).astype(np.float32) *
+                #m_t=np.random.exponential(1, size=(self._cfg.ensemble_size, self._num_rewards)).astype(np.float32),
+                z_t=np.random.randn(self._cfg.ensemble_size, self._num_rewards).astype(np.float32) *
                 self._cfg.noise_scale,
             ))
 
@@ -224,8 +213,9 @@ class DBMRPE(Agent):
 
         if self._total_steps % self._cfg.sgd_period != 0:
             return None
-        minibatch = self._replay.sample(self._cfg.batch_size)
-        return self._gradient_step(TorchTransitions.from_minibatch(minibatch, self._device, self._num_rewards))
+        minibatch= self._replay.sample(self._cfg.batch_size) #, idxs, weights = 
+
+        return self._gradient_step(TorchTransitions.from_minibatch(minibatch, self._device, self._num_rewards))#, idxs, weights)
 
     def save_model(self, path: str, seed: int, step: int):
         model_path = f"{path}/models"
@@ -258,11 +248,11 @@ class DBMRPE(Agent):
         )
     
 
-    def dump_buffer(self, path: str, env_config: EnvConfig, seed: int):
-        super().dump_buffer(path, env_config, seed)
-        file_path = f"{path}/{self.NAME}_{seed}_info.pkl.lzma"
+    # def dump_buffer(self, path: str, env_config: EnvConfig, seed: int):
+    #     super().dump_buffer(path, env_config, seed)
+    #     file_path = f"{path}/{self.NAME}_{seed}_info.pkl.lzma"
 
-        with lzma.open(file_path, 'wb') as f:
-            pickle.dump({'history_chosen_rewards': self._history_chosen_rewards,
-                         'history_delta_min': self._history_delta_min}, 
-                        f, protocol=pickle.HIGHEST_PROTOCOL)
+    #     with lzma.open(file_path, 'wb') as f:
+    #         pickle.dump({'history_chosen_rewards': self._history_chosen_rewards,
+    #                      'history_delta_min': self._history_delta_min}, 
+    #                     f, protocol=pickle.HIGHEST_PROTOCOL)

@@ -4,6 +4,9 @@ import numpy as np
 import torch
 from multireward_ope.continuous.agents.utils.utils import NumpyObservation, TimeStep
 from multireward_ope.continuous.agents.utils.replay_buffer import ReplayBuffer
+from multireward_ope.continuous.agents.utils.per_buffer import PrioritizedReplayBuffer
+from multireward_ope.continuous.agents.utils.trajectory_replay_buffer import TrajectoryReplayBuffer
+
 from datetime import datetime
 
 class Agent(abc.ABC):
@@ -11,9 +14,10 @@ class Agent(abc.ABC):
     Base class of an exploration agent
     """
     NAME = 'AbstractAgent'
-    def __init__(self, epsilon: float, capacity: int, device: torch.device):
+    def __init__(self, epsilon: float, capacity: int, horizon: int, device: torch.device):
         self._epsilon = epsilon
-        self._replay =  ReplayBuffer(capacity=capacity)
+        self._replay =  TrajectoryReplayBuffer(capacity=capacity, trajectory_length=horizon)#PrioritizedReplayBuffer(capacity=capacity)#
+        
         self._device = device
 
     def eps_fn(self, steps: int) -> float:
@@ -28,11 +32,15 @@ class Agent(abc.ABC):
         return self._replay
 
     @abc.abstractmethod
-    def select_action(self, observation: NumpyObservation, step: int) -> int:
+    def qvalues(self, observation: TimeStep) -> np.ndarray:
+        pass
+
+    @abc.abstractmethod
+    def select_action(self, observation: TimeStep, step: int) -> int:
         pass
     
     @abc.abstractmethod
-    def select_greedy_action(self, observation: NumpyObservation) -> int:
+    def select_greedy_action(self, observation: TimeStep) -> int:
         pass
 
     @abc.abstractmethod
