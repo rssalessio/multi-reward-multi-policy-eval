@@ -7,9 +7,8 @@ from multireward_ope.tabular.mdp import MDP
 from multireward_ope.tabular.utils import policy_evaluation
 
 @dataclass
-class GVFExplorerConfig:
-    noise_parameter: float
-    policy_update_frequency: int
+class SFNRConfig:
+    alpha: float
 
 
     @classmethod
@@ -17,13 +16,13 @@ class GVFExplorerConfig:
         return ''
 
     
-class GVFExplorer(Agent):
-    """ GVFExplorer Algorithm 
-        @See https://arxiv.org/pdf/2405.07838
+class SFNR(Agent):
+    """ SFNR Algorithm 
+        @See https://arxiv.org/pdf/2202.11133
     """
 
     def __init__(self,
-                 cfg: GVFExplorerConfig, **kwargs):
+                 cfg: SFNRConfig, **kwargs):
         self.cfg = cfg
         super().__init__(**kwargs)
         self.uniform_policy = np.ones(self.dim_action_space) / self.dim_action_space

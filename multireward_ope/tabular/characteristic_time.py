@@ -29,14 +29,15 @@ class CharacteristicTimeSolver(object):
     prev_A: npt.NDArray[np.float64] | None
     MAX_ITER: int = 500
 
-    def __init__(self, dim_state: int, dim_actions: int, solver: str = cp.ECOS):
+    def __init__(self, dim_state: int, dim_actions: int, num_policies: int, solver: str = cp.ECOS):
         self.dim_state = dim_state
         self.dim_actions = dim_actions
         self.theta = cp.Variable(dim_state, nonneg=True)
         self.KG = cp.Parameter((dim_state, dim_state))
         self.e_i = cp.Parameter(dim_state)
+        self.num_policies = num_policies
         self.solver = solver
-        self.prev_theta = np.zeros((dim_state, dim_state, dim_state), order='C')
+        self.prev_theta = np.zeros((num_policies, dim_state, dim_state, dim_state), order='C')
         self.prev_omega = None
         self.prev_A = None
 
@@ -73,25 +74,25 @@ class CharacteristicTimeSolver(object):
     def solve(self,
               gamma: float, 
               mdp: MDP,
-              policy: Policy) -> BoundResult:
+              policies: Sequence[Policy]) -> BoundResult:
         """Solve the characteristic time optimization problem
 
         Args:
             gamma (float): discount facotr
             mdp (MDP): MDP considered
-            policy (Policy): deterministic policy of size S
+            policies (Sequence[Policy]): list of deterministic policies of size S
 
         Returns:
             BoundResult: A tuple containing the value of the problem and the optimal solution
         """
         if self.rewards.set_type == RewardSetType.FINITE:
-            return self._solve_finite(gamma, mdp, policy)
+            return self._solve_finite(gamma, mdp, policies)
         elif self.rewards.set_type == RewardSetType.REWARD_FREE:
-            return self._solve_rewardfree(gamma, mdp, policy)
+            return self._solve_rewardfree(gamma, mdp, policies)
         elif self.rewards.set_type == RewardSetType.NONE:
             raise Exception('RewardsSetType is set to None!')
         else:
-            return self._solve_general(gamma, mdp, policy)
+            return self._solve_general(gamma, mdp, policies)
         
 
     def evaluate(self,
@@ -99,8 +100,8 @@ class CharacteristicTimeSolver(object):
               gamma: float,
               epsilon: float, 
               mdp: MDP,
-              policy: Policy,
-              force: bool = False) -> float:
+              policies: Sequence[Policy],
+              force: bool = False) -> Sequence[float]:
         """Solve the characteristic time optimization problem
 
         Args:
@@ -108,19 +109,22 @@ class CharacteristicTimeSolver(object):
             gamma (float): discount factor
             epsilon (float): accuracy level
             mdp (MDP): MDP considered
-            policy (Policy): deterministic policy of size S
+            policies (Policy): deterministic policy of size S
 
         Returns:
-            BoundResult: A tuple containing the value of the problem and the optimal solution
+            Sequence[float]: A list of values for each policy
         """
         if self.prev_A is None or force:
-            self.solve(gamma, mdp, policy=policy)
-        obj = np.multiply(self.prev_A, omega[np.arange(mdp.dim_state), policy]).max()
-        obj *= (gamma / (2 * epsilon * (1 -  gamma))) ** 2
-        return obj
+            self.solve(gamma, mdp, policies=policies)
+        objs = []
+        for policy in policies:
+            obj = np.multiply(self.prev_A, omega[np.arange(mdp.dim_state), policy]).max()
+            obj *= (gamma / (2 * epsilon * (1 -  gamma))) ** 2
+            objs.append(obj)
+        return objs
 
         
-    def _solve(self, A: npt.NDArray[np.float64], gamma: float, mdp: MDP, policy: Policy):
+    def _solve(self, A: npt.NDArray[np.float64], gamma: float, mdp: MDP, policies: Sequence[Policy]):
         normalization = (1 - gamma) ** 3
         omega = cp.Variable((self.dim_state, self.dim_actions), nonneg=True)
         if self.prev_omega is not None:
@@ -130,10 +134,14 @@ class CharacteristicTimeSolver(object):
         constraints.extend(
             [cp.sum(omega[s]) == cp.sum(cp.multiply(mdp.P[:,:,s], omega)) for s in range(self.dim_state)])
     
-        omega_pi = omega[np.arange(mdp.dim_state), policy]
-        obj = cp.multiply(A* normalization, cp.inv_pos(omega_pi)) 
+        objs= []
+        for policy in policies:
+            omega_pi = omega[np.arange(mdp.dim_state), policy]
+            obj = cp.multiply(A* normalization, cp.inv_pos(omega_pi))
+            objs.append(cp.max(obj))
 
-        obj = cp.Minimize(cp.max(obj))
+        objs = cp.vstack(objs)
+        obj = cp.Minimize(cp.max(objs))
         T_problem = cp.Problem(obj, constraints)
         res = T_problem.solve(solver=self.solver)
         self.prev_omega = omega.value
@@ -143,72 +151,75 @@ class CharacteristicTimeSolver(object):
     def _solve_rewardfree(self,
               gamma: float, 
               mdp: MDP,
-              policy: Policy) -> BoundResult:
-        G = mdp.build_stationary_matrix(policy, gamma=gamma)
-        K = mdp.build_K(policy)
+              policies: Sequence[Policy]) -> BoundResult:
+        G = [mdp.build_stationary_matrix(policy, gamma=gamma) for policy in policies]
+        K = [mdp.build_K(policy) for policy in policies]
 
-        A = np.zeros((mdp.dim_state, mdp.dim_state))
-        for i in range(mdp.dim_state):
-            for s in range(mdp.dim_state):
-                KG = K[s] @ G
-                Ai_s = KG[i]
-                pos_idxs = Ai_s >= 0
-                
-                A[s,i] = np.maximum(Ai_s[pos_idxs].sum(-1), Ai_s[~pos_idxs].sum(-1))
+        A = np.zeros((len(policies), mdp.dim_state, mdp.dim_state))
+        for p in range(len(policies)):
+            for i in range(mdp.dim_state):
+                for s in range(mdp.dim_state):
+                    KG = K[p][s] @ G[p]
+                    Ai_s = KG[i]
+                    pos_idxs = Ai_s >= 0
+                    
+                    A[p,s,i] = np.maximum(Ai_s[pos_idxs].sum(-1), Ai_s[~pos_idxs].sum(-1))
         A = A.max(-1) ** 2
         self.prev_A = A
-        return self._solve(A, gamma, mdp, policy)
+        return self._solve(A, gamma, mdp, policies)
 
     def _solve_general(self,
               gamma: float, 
               mdp: MDP,
-              policy: Policy) -> BoundResult:
-        G = mdp.build_stationary_matrix(policy, gamma=gamma)
-        K = mdp.build_K(policy)
+              policies: Sequence[Policy]) -> BoundResult:
+        G = [mdp.build_stationary_matrix(policy, gamma=gamma) for policy in policies]
+        K = [mdp.build_K(policy) for policy in policies]
 
-        A = np.zeros((mdp.dim_state, mdp.dim_state))
-        for i in range(mdp.dim_state):
-            e_i = np.zeros(self.dim_state)
-            e_i[i] = 1
-            self.e_i.value = e_i
-            for s in range(mdp.dim_state):
-                self.KG.value = K[s] @ G
-                if self.prev_theta is not None:
-                    self.theta.value = self.prev_theta[i,s]
-                res = self._solve_rho(solver = self.solver)
-                A[s,i] = res
-                if self.theta.value is not None:
-                    self.prev_theta[i,s] = self.theta.value
+        A = np.zeros((len(policies), mdp.dim_state, mdp.dim_state))
+        for p in range(len(policies)):
+            for i in range(mdp.dim_state):
+                e_i = np.zeros(self.dim_state)
+                e_i[i] = 1
+                self.e_i.value = e_i
+                for s in range(mdp.dim_state):
+                    self.KG.value = K[p][s] @ G[p]
+                    if self.prev_theta is not None:
+                        self.theta.value = self.prev_theta[p,i,s]
+                    res = self._solve_rho(solver = self.solver)
+                    A[p, s,i] = res
+                    if self.theta.value is not None:
+                        self.prev_theta[p, i,s] = self.theta.value
 
         A = A.max(-1) ** 2
         self.prev_A = A
         
-        return self._solve(A, gamma, mdp, policy)
+        return self._solve(A, gamma, mdp, policies)
 
 
     def _solve_finite(self,
               gamma: float, 
               mdp: MDP,
-              policy: Policy) -> BoundResult:
-        G = mdp.build_stationary_matrix(policy, gamma=gamma)
-        K = mdp.build_K(policy)
-        A = np.zeros((mdp.dim_state, mdp.dim_state))
+              policies: Sequence[Policy]) -> BoundResult:
+        G = [mdp.build_stationary_matrix(policy, gamma=gamma) for policy in policies]
+        K = [mdp.build_K(policy) for policy in policies]
+        A = np.zeros((len(policies), mdp.dim_state, mdp.dim_state))
 
         rewards: npt.NDArray[np.float64] = self.rewards.rewards
         nr = rewards.shape[0]
-        for i in range(mdp.dim_state):
-            e_i = np.zeros(self.dim_state)
-            e_i[i] = 1
-            for s in range(mdp.dim_state):
-                obj = []
-                KG = K[s] @ G
-                for r in range(nr):
-                    obj.append(np.abs(e_i.T @ KG @ rewards[r]))
-                res = np.max(obj)
-                A[s,i] = res
+        for p in range(len(policies)):
+            for i in range(mdp.dim_state):
+                e_i = np.zeros(self.dim_state)
+                e_i[i] = 1
+                for s in range(mdp.dim_state):
+                    obj = []
+                    KG = K[p][s] @ G[p]
+                    for r in range(nr):
+                        obj.append(np.abs(e_i.T @ KG @ rewards[r]))
+                    res = np.max(obj)
+                    A[p, s,i] = res
         A = A.max(-1) ** 2
         self.prev_A = A
         
-        return self._solve(A, gamma, mdp, policy)
+        return self._solve(A, gamma, mdp, policies)
 
 

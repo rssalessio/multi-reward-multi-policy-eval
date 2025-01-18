@@ -14,9 +14,13 @@ class Agent(abc.ABC):
     Base class of an exploration agent
     """
     NAME = 'AbstractAgent'
-    def __init__(self, epsilon: float, capacity: int, horizon: int, device: torch.device):
+    def __init__(self, state_dim, num_actions, num_rewards, epsilon: float, capacity: int, device: torch.device):
         self._epsilon = epsilon
-        self._replay =  TrajectoryReplayBuffer(capacity=capacity, trajectory_length=horizon)#PrioritizedReplayBuffer(capacity=capacity)#
+        self._state_dim = state_dim
+        self._num_actions = num_actions
+        self._num_rewards = num_rewards
+        self.mdp_visitation = np.zeros((state_dim, num_actions, state_dim))
+        self._replay =  ReplayBuffer(capacity=capacity)#PrioritizedReplayBuffer(capacity=capacity)#
         
         self._device = device
 
@@ -43,8 +47,12 @@ class Agent(abc.ABC):
     def select_greedy_action(self, observation: TimeStep) -> int:
         pass
 
-    @abc.abstractmethod
     def update(self, timestep: TimeStep) -> None:
+        self.mdp_visitation[timestep.observation.argmax(), timestep.action, timestep.next_observation.argmax()] += 1
+        self._update(timestep)
+
+    @abc.abstractmethod
+    def _update(self, timestep: TimeStep) -> None:
         pass
     
     @abc.abstractstaticmethod

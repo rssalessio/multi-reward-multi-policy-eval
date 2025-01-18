@@ -2,7 +2,7 @@ from __future__ import annotations
 import numpy.typing as npt
 import numpy as np
 from abc import ABC, abstractmethod
-from typing import NamedTuple, Callable
+from typing import NamedTuple, Sequence
 from multireward_ope.tabular.mdp import MDP
 from multireward_ope.tabular.characteristic_time import BoundResult, CharacteristicTimeSolver
 from multireward_ope.tabular.reward_set import RewardSet
@@ -42,7 +42,7 @@ class Agent(ABC):
                  frequency_evaluation: int,
                  delta: float,
                  epsilon: float,
-                 policy: npt.NDArray[np.long],
+                 policies: Sequence[npt.NDArray[np.long]],
                  rewards: RewardSet,
                  solver_type: str, **kwargs):
         self.rewards = rewards
@@ -59,11 +59,18 @@ class Agent(ABC):
         self.frequency_evaluation = frequency_evaluation
         self.delta = delta
         self.solver_type = solver_type
-        self.solver = CharacteristicTimeSolver(self.ns, self.na, solver=self.solver_type)
+        self.num_policies = len(policies)
+        self.solver = CharacteristicTimeSolver(self.ns, self.na, self.num_policies, solver=self.solver_type)
         self.solver.build_problem(rewards)
-        self.policy = np.zeros((self.ns, self.na))
-        self.policy[np.arange(self.ns), policy] = 1.
+
+        
+        self.policies = np.zeros((self.num_policies, self.ns, self.na))
+        for p in range(self.num_policies):
+            self.policies[p, np.arange(self.ns), policies[p]] = 1.
         self.epsilon = epsilon
+
+        self.mixture_policy = self.policies.sum(0) / self.policies.sum(0).sum(-1, keepdims=True)
+
 
     @property
     @abstractmethod
@@ -92,13 +99,13 @@ class Agent(ABC):
     def U_t(self) -> float:
         w = self.state_action_visits / self.state_action_visits.sum()
         mdp = MDP(P = self.empirical_transition())
-        policy = self.policy.argmax(-1)
+        policies = self.policies.argmax(-1)
         return self.solver.evaluate(
             omega=w,
             gamma=self.discount_factor,
             epsilon=self.epsilon,
             mdp=mdp,
-            policy=policy,
+            policies=policies,
             force=True
         )
 

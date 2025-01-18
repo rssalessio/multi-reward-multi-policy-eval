@@ -73,7 +73,7 @@ class MRNaSPE(Agent):
             self.prev_omega = self.omega.copy()
             try:
                 mdp = MDP(P=self.empirical_transition())
-                results = self.solver.solve(self.discount_factor, mdp, self.policy.argmax(-1))
+                results = self.solver.solve(self.discount_factor, mdp, self.policies.argmax(-1))
                 if results.w is None:
                     return
             except Exception as e:

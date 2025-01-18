@@ -10,7 +10,7 @@ from typing import NamedTuple
 from scipy.spatial import HalfspaceIntersection
 from multireward_ope.tabular.utils import find_interior
 
-class RewardSetType(Enum):
+class RewardSetType(str, Enum):
     FINITE = 'Finite'
     CIRCLE = 'Circle'
     POLYTOPE = 'Polytope'

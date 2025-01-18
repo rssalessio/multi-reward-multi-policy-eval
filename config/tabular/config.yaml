@@ -6,9 +6,11 @@ defaults:
 experiment:
   num_simulations: 30
   num_processes: 15
-  horizon: 300000
+  horizon: 500000
   frequency_evaluation: 250
   delta: 0.01
   epsilon: 0.1
   discount_factor: 0.99
   solver_type: 'GUROBI'
+  reward_set: 'RewardFree'
+  single_policy: True

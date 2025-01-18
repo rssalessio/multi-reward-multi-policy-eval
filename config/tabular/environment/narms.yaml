@@ -1,4 +1,4 @@
 type: 'NArms'
 parameters:
   num_arms: 6
-  p0: 0.4
+  p0: 0.7

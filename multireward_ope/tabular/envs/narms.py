@@ -55,10 +55,10 @@ class NArms(MDP):
             transitions[0, s, s+1] = 1 if s == 0 else self.p0 / (s + 1)
             transitions[0, s, 0] = 1 - transitions[0, s, s+1]
 
-            transitions[s+1, s:, 0] = self.p0
-            transitions[s+1, s:, s+1] = 1-self.p0
-            transitions[s+1, :s, s+1] = 1-self.p0
-            transitions[s+1, :s, 0] = self.p0
+            transitions[s+1, s:, 0] = 1-self.p0
+            transitions[s+1, s:, s+1] = self.p0
+            transitions[s+1, :s, s+1] = self.p0
+            transitions[s+1, :s, 0] = 1-self.p0
 
         super().__init__(transitions)
         # Reset environment

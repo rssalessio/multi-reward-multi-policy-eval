@@ -5,7 +5,7 @@
 import math
 import torch
 import torch.nn as nn
-from multireward_ope.continuous.agents.utils.base_networks import BaseNetwork
+from multireward_ope.continuous.networks.base_networks import BaseNetwork
 
 class EnsembleLinear(nn.Module):
     """

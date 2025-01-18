@@ -45,27 +45,40 @@ class DeepSea(object):
 
         self._done = False
 
-    def compute_Q_values(self, rewards: NDArray[np.float32], gamma: float):
+    def compute_Q_values(self, rewards: NDArray[np.float32], gamma: float, P = None):
         Q = np.zeros((rewards.shape[0], self._size, self._size, 2))
-        p = self._slipping_probability
+        Qalt = np.zeros((rewards.shape[0], self._size * (self._size + 1)//2, 2))
 
-        for i in range(rewards.shape[0]):
-            for row in reversed(range(self._size - 1)):
-                for column in range(self._size):
-                    if column >= row + 1: break
-                    next_row = row + 1
+        if P is None:
+            S = self._size * (self._size + 1) //2
+            P = self._slipping_probability * np.ones((S,2,S))
+
+
+        find_id = lambda r,c: int(r*(r+1)/2 + c)
+    
+        for row in reversed(range(self._size - 1)):
+            for column in range(self._size):
+                if column >= row + 1: break
+                next_row = row + 1
+
+                s0 = find_id(row, column)
+                s1 = find_id(row, column)
+                
+                for action in [0,1]:
+                    if action:  # right
+                        next_column = np.clip(column + 1, 0, self._size - 1)
+                        inv_col= np.clip(column - 1, 0, self._size - 1)
+                    else:  # left
+                        next_column= np.clip(column - 1, 0, self._size - 1)
+                        inv_col= np.clip(column + 1, 0, self._size - 1)
                     
-                    for action in [0,1]:
-                        if action:  # right
-                            next_column = np.clip(column + 1, 0, self._size - 1)
-                            inv_col= np.clip(column - 1, 0, self._size - 1)
-                        else:  # left
-                            next_column= np.clip(column - 1, 0, self._size - 1)
-                            inv_col= np.clip(column + 1, 0, self._size - 1)
-                        Q[i, row, column, action] = (1-p) * (rewards[i, next_row, next_column] + gamma * Q[i, next_row, next_column].max()) + p * (rewards[i, next_row, inv_col] + gamma * Q[i, next_row, inv_col].max())
-        return Q
+                    prob = P[s0, action, s1]
+                    Q[:, row, column, action] = (1-prob) * (rewards[:, next_row, next_column] + gamma * Q[:, next_row, next_column,1]) + prob * (rewards[:, next_row, inv_col] + gamma * Q[:, next_row, inv_col,1])
+                    Qalt[:, s0, action] = (1-prob) * (rewards[:, next_row, next_column] + gamma * Qalt[:, s1,1]) + prob * (rewards[:, next_row, inv_col] + gamma * Qalt[:, s1,1])
+        return Q, Qalt
 
     def step(self, action: int) -> Tuple[TimeStep, Dict]:
+        original_action = action
         _current_observation = self._get_observation(self._row, self._column)
         eval_pol_action = self.eval_policy_action(_current_observation)
         
@@ -96,7 +109,7 @@ class DeepSea(object):
         self.visits[self._row, self._column] += 1
         observation = self._get_observation(self._row, self._column)
         eval_pol_next_action = self.eval_policy_action(observation)
-        return TimeStep(_current_observation, action, rewards, done, observation, eval_pol_action, eval_pol_next_action, False), {}
+        return TimeStep(_current_observation, original_action, rewards, done, observation, eval_pol_action, eval_pol_next_action, False), {}
 
     def reset(self) -> TimeStep:
         self._done = False

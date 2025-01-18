@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from numpy.typing import NDArray
+from multireward_ope.continuous.networks.ensemble_linear_layer import EnsembleLinear
 from typing import NamedTuple, Sequence, Optional, Tuple
 
 NumpyObservation = NDArray[np.float64]
@@ -67,7 +68,7 @@ class TorchTransitions(NamedTuple):
         a_tm1 = torch.tensor(a_tm1, dtype=torch.int64, requires_grad=False, device=device)
         a_pi_tm1 = torch.tensor(a_pi_tm1, dtype=torch.int64, requires_grad=False, device=device)
         a_pi_t = torch.tensor(a_pi_t, dtype=torch.int64, requires_grad=False, device=device)
-        r_t = torch.tensor(r_t[:, :num_rewards], dtype=torch.float32, requires_grad=False, device=device)
+        r_t = torch.tensor(r_t, dtype=torch.float32, requires_grad=False, device=device)
         d_t = torch.tensor(d_t, dtype=torch.float32, requires_grad=False, device=device)
         o_tm1 = torch.tensor(o_tm1, dtype=torch.float32, requires_grad=False, device=device)
         o_t = torch.tensor(o_t, dtype=torch.float32, requires_grad=False, device=device)
@@ -79,7 +80,7 @@ class TorchTransitions(NamedTuple):
         r_t = self.r_t.unsqueeze(1)
         d_t = self.d_t[..., None, None]
         z_t = self.z_t#.unsqueeze(-1)
-        m_t = self.m_t.unsqueeze(-1)
+        m_t = self.m_t#.unsqueeze(-1)
 
         a_tm1 = self.a_tm1[..., None, None, None].expand(
                 -1, ensemble_size, num_rewards, 1)
@@ -101,101 +102,18 @@ def expand_obs_with_rewards(obs: torch.Tensor, rewards: torch.Tensor) -> torch.T
     return torch.cat((obs_exp, rew_exp), dim=2).reshape(n * m, m+d)
 
     
-def weight_init(m, generator: torch.Generator):
+def weight_init(m):
     """Custom weight init for Conv2D and Linear layers."""
     if isinstance(m, nn.Linear):
-        nn.init.orthogonal_(m.weight.data, generator=generator)
+        nn.init.orthogonal_(m.weight.data)
         if hasattr(m.bias, 'data'):
             m.bias.data.fill_(0.0)
     elif isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
         gain = nn.init.calculate_gain('relu')
-        nn.init.orthogonal_(m.weight.data, gain, generator=generator)
+        nn.init.orthogonal_(m.weight.data, gain)
         if hasattr(m.bias, 'data'):
             m.bias.data.fill_(0.0)
-
-
-class RMS(object):
-    """running mean and std """
-    def __init__(self, device, epsilon=1e-4, shape=(1,)):
-        self.M = torch.zeros(shape).to(device)
-        self.S = torch.ones(shape).to(device)
-        self.n = epsilon
-
-    def __call__(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        bs = x.size(0)
-        delta = torch.mean(x, dim=0) - self.M
-        new_M = self.M + delta * bs / (self.n + bs)
-        new_S = (self.S * self.n + torch.var(x, dim=0) * bs +
-                 torch.square(delta) * self.n * bs /
-                 (self.n + bs)) / (self.n + bs)
-
-        self.M = new_M
-        self.S = new_S
-        self.n += bs
-
-        return self.M, self.S
-
-
-
-class PBE(object):
-    """particle-based entropy based on knn normalized by running mean """
-    def __init__(self, rms, knn_clip, knn_k, knn_avg, knn_rms, device):
-        self.rms = rms
-        self.knn_rms = knn_rms
-        self.knn_k = knn_k
-        self.knn_avg = knn_avg
-        self.knn_clip = knn_clip
-        self.device = device
-
-    def __call__(self, rep):
-        source = target = rep
-        b1, b2 = source.size(0), target.size(0)
-        # (b1, 1, c) - (1, b2, c) -> (b1, 1, c) - (1, b2, c) -> (b1, b2, c) -> (b1, b2)
-        sim_matrix = torch.norm(source[:, None, :].view(b1, 1, -1) -
-                                target[None, :, :].view(1, b2, -1),
-                                dim=-1,
-                                p=2)
-        reward, _ = sim_matrix.topk(self.knn_k,
-                                    dim=1,
-                                    largest=False,
-                                    sorted=True)  # (b1, k)
-        if not self.knn_avg:  # only keep k-th nearest neighbor
-            reward = reward[:, -1]
-            reward = reward.reshape(-1, 1)  # (b1, 1)
-            reward /= self.rms(reward)[0] if self.knn_rms else 1.0
-            reward = torch.maximum(
-                reward - self.knn_clip,
-                torch.zeros_like(reward).to(self.device)
-            ) if self.knn_clip >= 0.0 else reward  # (b1, 1)
-        else:  # average over all k nearest neighbors
-            reward = reward.reshape(-1, 1)  # (b1 * k, 1)
-            reward /= self.rms(reward)[0] if self.knn_rms else 1.0
-            reward = torch.maximum(
-                reward - self.knn_clip,
-                torch.zeros_like(reward).to(
-                    self.device)) if self.knn_clip >= 0.0 else reward
-            reward = reward.reshape((b1, self.knn_k))  # (b1, k)
-            reward = reward.mean(dim=1, keepdim=True)  # (b1, 1)
-        reward = torch.log(reward + 1.0)
-        return reward
-    
-class RollingMinimum(object):
-    def __init__(self, m: int, n: int, min: float):
-        self.m = m  # Number of classes
-        self.n = n  # Size of each deque
-        self.data = np.full((m, n), min, order='C', dtype=np.float64)  # Initialize with infinity
-        self.index = 0  # Current indexes for insertion
-        self.mins = np.full(m, min, order='C', dtype=np.float64)  # Running minimums
-        self._def_min = min
-        
-    def add(self, points: NDArray[np.float64]):
-        self.data[:, self.index % self.n] = np.maximum(self._def_min, points)
-        self.index += 1
-        self.mins = np.mean(self.data, axis=-1)#np.quantile(self.data, 0.1, axis=-1)
-    
-    def get_running_mins(self) -> NDArray[np.float64]:
-        return self.mins
-    
-def compute_model_parameters(model) -> int:
-    model_parameters = filter(lambda p: p.requires_grad, model.parameters())
-    return sum([np.prod(p.size()) for p in model_parameters])
+    elif isinstance(m, EnsembleLinear):
+                stddev = np.sqrt(2 / (m.weight.shape[0] + m.weight.shape[1]))
+                torch.nn.init.trunc_normal_(m.weight, mean=0, std=stddev, a=-3*stddev, b=3*stddev)
+                torch.nn.init.zeros_(m.bias.data)

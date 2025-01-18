@@ -20,17 +20,12 @@ class DBMRPE(Agent):
             state_dim: int,
             num_actions: int,
             num_rewards: int,
-            horizon: int,
             config: DBMRPEConfig,
             device: torch.device):
-        super().__init__(config.epsilon_0, config.replay_capacity, horizon, device)
+        super().__init__(state_dim, num_actions, num_rewards, config.epsilon_0, config.replay_capacity, device)
 
         # Agent components.
-        self._state_dim = state_dim
-        self._num_actions = num_actions
-        self._num_rewards = num_rewards
         self._cfg = config
-        self.mdp_visitation = np.ones((state_dim, num_actions, state_dim))
         self._reward_vectors = torch.eye(self._num_rewards).to(device)
         self._ensemble = ValueEnsembleWithPrior(self._state_dim,
                                                 self._num_rewards,
@@ -50,7 +45,6 @@ class DBMRPE(Agent):
         self._optimizer = torch.optim.AdamW(
             [
                 {"params": self._ensemble._q_network.parameters(), "lr": config.lr_Q},
-                {"params": self._ensemble._q_network_sn.parameters(), "lr": config.lr_Q},
                 {"params": self._ensemble._m_network.parameters(), "lr": config.lr_M}
             ])
 
@@ -59,6 +53,14 @@ class DBMRPE(Agent):
     
         self._gradient_steps = 0
         self._start = True
+        self.idx = np.random.choice(self._num_rewards)
+        self.idx_head = np.random.choice(self._cfg.ensemble_size)
+        self.chosen_rewards = np.zeros(self._num_rewards)
+        self.chosen_rewards[self.idx] += 1
+        self.const = max(0.1,np.random.exponential(scale=2))
+        self.prev_rms_std = 0
+        self.curr_rms_std = 1
+        self.max_std = 1e-3
 
 
     def _gradient_step(self, batch: TorchTransitions):#, idxs, weights):
@@ -67,56 +69,48 @@ class DBMRPE(Agent):
         _batch = batch.expand_batch(self._cfg.ensemble_size, self._num_rewards)
         m_t = _batch.m_t
 
-
+        #m_t = m_t.exponential_()
         # m_t = np.random.binomial(1, 0.7, (self._cfg.batch_size, self._cfg.ensemble_size)).astype(np.float32)[..., None]
         # m_t = torch.tensor(m_t, device=self._device, dtype=torch.float64)
  
     
         with torch.no_grad():
+            values_t= self._ensemble.forward(_batch.o_t)
             tgt_values_t= self._tgt_ensemble.forward(_batch.o_t)
             tgt_values_tm1 = self._tgt_ensemble.forward(_batch.o_tm1)
 
-            q_next_target = tgt_values_t.q_values.gather(-1, _batch.a_pi_t).squeeze(-1)
-            target_q = _batch.r_t + _batch.z_t + self._cfg.discount * (1-_batch.d_t) * q_next_target
-            
-            q_next_target_sn = tgt_values_t.q_values_sn.gather(-1, _batch.a_pi_t[:,0]).squeeze(-1)
-            target_q_sn = _batch.r_t[:,0] + self._cfg.discount * (1-_batch.d_t[:,0]) * q_next_target_sn
-     
-            
+            oh_t = torch.nn.functional.one_hot(_batch.a_pi_t.squeeze(-1), self._num_actions).float()
+            softmaxed_t = torch.nn.functional.softmax(oh_t/0.25,dim=-1)
+    
+
+            q_next_target = ( tgt_values_t.q_values * softmaxed_t).sum(-1)
+            target_q = _batch.r_t  + self._cfg.discount * (1-_batch.d_t) * q_next_target
+
+            # M
             q_values_tgt = tgt_values_tm1.q_values.gather(-1, _batch.a_tm1).squeeze(-1)
-            M = (_batch.r_t + _batch.z_t + (1-_batch.d_t) * self._cfg.discount * q_next_target - q_values_tgt.detach()) / (self._cfg.discount)
-            target_M = (M ** 2).detach()
+            delta = (_batch.r_t + self._cfg.discount * q_next_target - q_values_tgt.detach()) / (self._cfg.discount)
+            #M = (1-_batch.d_t) * self._cfg.discount * q_next_target - q_values_tgt.detach()
+            ind = (_batch.a_tm1 == _batch.a_pi_tm1).float().squeeze(-1)
+            next_actions = values_t.m_values.argmax(-1, keepdim=True)
+            next_M = tgt_values_t.m_values.gather(-1, next_actions).squeeze(-1)
+         
+            
+            target_M = (delta.square()  + q_values_tgt.std(1, keepdim=True)).mul(ind) + (1-_batch.d_t) *self._cfg.discount * next_M
     
         values = self._ensemble.forward(_batch.o_tm1)
         q_values = values.q_values.gather(-1, _batch.a_tm1).squeeze(-1)
-        q_values_sn = values.q_values_sn.gather(-1, _batch.a_tm1[:,0]).squeeze(-1)
         
-        # if np.random.uniform() < 1e-3:
-        #     import pdb
-        #     pdb.set_trace()
-        #_m_t=np.random.exponential(1, size=m_t.shape)
-        #m_t = torch.tensor(_m_t, dtype=torch.float32, device=m_t.device)
-        # if np.random.rand() < 1e-3:
-        #     import pdb
-        #     pdb.set_trace()
-        #weights = torch.tensor(weights, dtype=torch.float32, device=q_values.device, requires_grad=False).unsqueeze(-1).unsqueeze(-1)
-
-        q_loss =   torch.mul(torch.square(q_values - target_q.detach()),  m_t).sum(-1).sum(-1).mean()
+ 
+        q_loss =   torch.mul(torch.square(q_values - target_q.detach()),  m_t).mean()
         
         m_values = values.m_values.gather(-1, _batch.a_tm1).squeeze(-1)
 
-        m_loss =   torch.mul(torch.square(m_values - target_M.detach()), m_t).sum(-1).sum(-1).mean()
-
-        tderr = q_values_sn - target_q_sn.detach()
-        qsn_loss = ( torch.square(tderr).sum(-1)).mean()
-
-        # if torch.any(_batch.r_t > 0):
-        #     import pdb
-        #     pdb.set_trace()
-
-        total_loss =q_loss + m_loss +qsn_loss
+        m_loss =   torch.mul(torch.square(m_values - target_M.detach()), m_t).mean()
+        total_loss =q_loss + m_loss 
         self._optimizer.zero_grad()
         total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self._ensemble.parameters(), 2.0)
+
         self._optimizer.step()
         
         self._gradient_steps += 1
@@ -126,6 +120,11 @@ class DBMRPE(Agent):
         
         self._tgt_ensemble.soft_update(self._ensemble, self._cfg.target_soft_update)
         #self.buffer.update_priorities(idxs, tderr.abs().max(-1)[0].detach().cpu().numpy() + 1e-5)
+        self.prev_rms_std = self.curr_rms_std
+        self.curr_rms_std =  0.95*self.curr_rms_std + 0.05* values.q_values.std(1).max().item()
+        if self.curr_rms_std > self.max_std:
+            self.max_std = self.curr_rms_std
+        
 
 
         return total_loss.item()
@@ -134,10 +133,20 @@ class DBMRPE(Agent):
     def qvalues(self, observation: TimeStep) -> np.ndarray:
         th_observation = torch.tensor(observation.observation[None, ...], dtype=torch.float32, device=self._device)
         values  = self._ensemble.forward(th_observation)
-        
+        # std = max(values.q_values[0].std(0).max().item(), values.m_values[0].std(0).max().item())
+        # std = max(0.5,np.exp(3*std) - 0.5)
         # Size (1, ensemble size, num rewards, actions) -> (ensemble size, num_rewards, actions)
-        q_values = values.q_values_sn[0].cpu().numpy()
-        return q_values
+        q_values = values.q_values[0].mean(0).cpu().numpy()
+        const= max(values.q_values[0].std(0).max().item(), values.m_values[0].std(0).max().item())
+        C0 = np.log(self._num_actions * 0.95 /(1- 0.95))
+        b = 2*(np.exp(C0 - 0.5) -1) 
+        C = C0 - np.log(1+b*values.q_values[0].std(0).max().item())
+        C = C0 - np.log(1+b* max(const/self.curr_rms_std,0))
+
+
+        print(f'CHOSEN REW  {self.chosen_rewards}')
+
+        return q_values, (const/self.curr_rms_std , const/self.max_std, values.m_values[0].std(0).max().item(), values.q_values[0].std(0).max().item())
 
     
     @torch.no_grad()
@@ -151,22 +160,41 @@ class DBMRPE(Agent):
         values  = self._ensemble.forward(th_observation)
         
         # Size (1, ensemble size, num rewards, actions) -> (ensemble size, num_rewards, actions)
-        q_values = values.q_values[0]#.cpu().numpy().astype(np.float64)[0]
-        m_values = values.m_values[0]#.cpu().numpy().astype(np.float64)[0]
-        # if np.random.rand() < 1e-3:
-        #     import pdb
-        #     pdb.set_trace()
-        #     print(m_values.mean(0))
+        q_values = values.q_values[0,self.idx_head, self.idx]#.cpu().numpy().astype(np.float64)[0]
+        m_values = values.m_values[0,self.idx_head, self.idx]#.cpu().numpy().astype(np.float64)[0]
+
+        # rr = np.random.rand()
+        # q_values = torch.quantile(q_values, rr, dim=0, keepdim=False)
+        # m_values = torch.quantile(m_values, rr, dim=0, keepdim=False) 
+
+        return m_values.argmax().item()
+        # std = max(q_values.std(0).max().item(), m_values.std(0).max().item())
+        # # std = max(0.5,np.exp(3*std) - 0.5)
         
-        one_hot = torch.nn.functional.one_hot(torch.tensor(obs.eval_policy_action), self._num_actions).float()
-        softmaxed = torch.nn.functional.softmax(one_hot / m_values.std(0).max() )
+        # one_hot = torch.nn.functional.one_hot(torch.tensor(obs.eval_policy_action), self._num_actions).float()
+        
+        # const = torch.max(values.q_values[0].std(0).max(), values.m_values[0].std(0).max()).item()
+
+        # C0 = np.log(self._num_actions * 0.95 /(1- 0.95))
+        # b = 2*(np.exp(C0 - 0.5) -1) 
+        # C = C0 - np.log(1+b* max(const/self.max_std,0))
+
+        # softmaxed = torch.nn.functional.softmax(C * one_hot)#/ 2)#(1 + std))
     
-        q_values = torch.quantile(q_values, self._cfg.quantile, dim=0, keepdim=False)
-        m_values = torch.quantile(m_values, self._cfg.quantile, dim=0, keepdim=False) 
+        # rr = np.random.rand()
+        # q_values = torch.quantile(q_values, rr, dim=0, keepdim=False)
+        # m_values = torch.quantile(m_values, rr, dim=0, keepdim=False) 
         
-        lse_m_values = softmaxed * torch.logsumexp(m_values, dim=0)
-        probs = lse_m_values / lse_m_values.sum()
-        return torch.multinomial(probs, 1, replacement=True).item()
+        # #lse_m_values = softmaxed * torch.logsumexp(m_values, dim=0)
+        # lse_m_values = torch.logsumexp(m_values, dim=0)
+        # if np.random.rand() < 1e-3:
+        #     print(lse_m_values)
+        # lse_m_values=  lse_m_values.div(2).softmax(dim=-1)
+        # #lse_m_values = lse_m_values / lse_m_values.sum()
+        # eps = min(1,const/self.curr_rms_std)
+        # probs = eps * lse_m_values + (1-eps) * one_hot
+        # # probs =  probs #+ 0.1 * torch.ones(self._num_actions, device=probs.device)/self._num_actions
+        # return torch.multinomial(probs, 1, replacement=True).item()
         # q_values_max = q_values.max(-1)
         # mask = np.isclose(q_values- q_values_max, 0)
 
@@ -185,12 +213,36 @@ class DBMRPE(Agent):
     def select_greedy_action(self, observation: TimeStep) -> int:
         return self._select_action(observation, greedy=True)
     
-    def update(self, timestep: TimeStep) -> None:
+    def _update(self, timestep: TimeStep) -> None:
         """Update the agent: add transition to replay and periodically do SGD."""
         self._total_steps += 1
 
-        self.mdp_visitation[timestep.observation.argmax(), timestep.action, timestep.next_observation.argmax()] += 1
+        if self._start:
+            self._start = False
+            
 
+
+        if timestep.done:
+            self._start = True
+            self.idx_head = np.random.choice(self._cfg.ensemble_size)
+            U = self.chosen_rewards < np.sqrt(self.chosen_rewards.sum()) - self._num_rewards
+            if np.any(U):
+                self.idx = self.chosen_rewards.argmin()
+            else:
+                with torch.no_grad():
+                    th_observation = torch.tensor(timestep.observation[None, ...], dtype=torch.float32, device=self._device)
+                    values  = (self._ensemble.forward(th_observation).m_values[0].max(0)[0].mean(-1)).softmax(dim=0)
+                    print(f'VALUES {values}')
+                    # import pdb
+                    # pdb.set_trace()
+                    if np.random.rand() < 0.2:
+                        self.idx = np.random.choice(self._num_rewards)
+                    else:
+                        self.idx = np.random.choice(self._num_rewards, p = values.cpu().numpy())
+            self.chosen_rewards[self.idx] += 1
+            
+        
+    
         timestep = timestep.to_float32()
         self._replay.add(
             TransitionWithMaskAndNoise(
@@ -201,11 +253,9 @@ class DBMRPE(Agent):
                 r_t=timestep.rewards,
                 d_t=timestep.done,
                 o_t=timestep.next_observation,
-                m_t=np.random.binomial(1, 0.7,
-                                    self._cfg.ensemble_size).astype(np.float32),
-                #m_t=np.random.exponential(1, size=(self._cfg.ensemble_size, self._num_rewards)).astype(np.float32),
-                z_t=np.random.randn(self._cfg.ensemble_size, self._num_rewards).astype(np.float32) *
-                self._cfg.noise_scale,
+                m_t=np.random.binomial(1, 0.5,
+                                    (self._cfg.ensemble_size, self._num_rewards)).astype(np.float32),
+                z_t=np.random.randn(self._cfg.ensemble_size, 1).astype(np.float32) * self._cfg.noise_scale,
             ))
 
         if self._replay.size < self._cfg.min_replay_size:

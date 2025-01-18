@@ -1,12 +1,12 @@
 defaults:
-  - agent: dbmr_pe
+  - agent: rnd_pe
   - environment: deepsea
   - _self_
 
 experiment:
   num_simulations: 30
   num_processes: 15
-  horizon: 300000
+  horizon: 500000
   frequency_evaluation: 250
   delta: 0.01
   epsilon: 0.1

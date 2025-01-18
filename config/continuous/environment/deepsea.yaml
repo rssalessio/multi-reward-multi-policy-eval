@@ -1,4 +1,4 @@
 type: 'DeepSea'
 parameters:
-  size: 10
+  size: 30
   slipping_probability: 0.05
