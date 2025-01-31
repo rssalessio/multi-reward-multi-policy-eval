@@ -197,7 +197,7 @@ class CharacteristicTimeSolver(object):
                 self.KG[rewardset_id].value = K[s] @ G
                 if self.prev_theta is not None:
                     self.theta[rewardset_id].value = self.prev_theta[rewardset_id,i,s]
-                res = self._solve_rho(solver = self.solver)
+                res = self._solve_rho(solver = self.solver, reward_id=rewardset_id)
                 A[s,i] = res
                 if self.theta[rewardset_id].value is not None:
                     self.prev_theta[rewardset_id, i,s] = self.theta[rewardset_id].value

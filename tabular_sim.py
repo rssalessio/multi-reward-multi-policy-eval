@@ -139,9 +139,9 @@ def run_experiments(cfg: DictConfig):
     date = datetime.today().strftime("%Y_%m_%d-%H_%M_%S")
     print(f'Configuration {cfg}')
 
-    # with mp.Pool(cfg.experiment.num_processes) as pool:
-    #     results = pool.starmap(run_single_experiment, [(x, cfg) for x in range(cfg.experiment.num_simulations)])
-    results = [run_single_experiment(0, cfg)]
+    with mp.Pool(cfg.experiment.num_processes) as pool:
+        results = pool.starmap(run_single_experiment, [(x, cfg) for x in range(cfg.experiment.num_simulations)])
+    # results = [run_single_experiment(0, cfg)]
     rel_results = np.array([res['rel_error'] for res in results])
     abs_results = np.array([res['abs_error'] for res in results])
 
