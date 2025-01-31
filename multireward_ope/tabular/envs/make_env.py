@@ -5,6 +5,8 @@ from multireward_ope.tabular.envs.forked_riverswim import ForkedRiverSwim
 from multireward_ope.tabular.envs.dataclasses import EnvParameters, EnvType
 
 
+Env = RiverSwim | DoubleChain | NArms | ForkedRiverSwim
+
 def make_env(env: EnvParameters):
     match env.type:
         case EnvType.RIVERSWIM.value:

@@ -1,19 +1,21 @@
+from __future__ import annotations
 import numpy as np
 import numpy.typing as npt
 from dataclasses import dataclass
 from multireward_ope.tabular.agents.base_agent import Agent, Experience
+from multireward_ope.tabular.reward_set import RewardSetType
 from enum import Enum
 from multireward_ope.tabular.mdp import MDP
 from multireward_ope.tabular.utils import policy_evaluation
 
 @dataclass
 class SFNRConfig:
-    alpha: float
+    discount_psi: float
+    temperature: float
 
-
-    @classmethod
-    def name(cls) -> str:
-        return ''
+    @staticmethod
+    def name(cls: SFNRConfig) -> str:
+        return f''
 
     
 class SFNR(Agent):
@@ -25,41 +27,45 @@ class SFNR(Agent):
                  cfg: SFNRConfig, **kwargs):
         self.cfg = cfg
         super().__init__(**kwargs)
+        assert len(self.policies) > 1, 'SFNR Only supports multiple policies'
         self.uniform_policy = np.ones(self.dim_action_space) / self.dim_action_space
-        eval_rewards = self.rewards.canonical_rewards()
+        
+        
+        self.discount_psi = cfg.discount_psi
+        self.behavior_policy = np.ones((self.dim_state_space, self.dim_action_space)) / self.dim_action_space
+        self.psi = np.ones((self.num_policies, self.dim_state_space, self.dim_action_space))
 
-        self.eval_rewards = np.zeros((eval_rewards.shape[0], self.dim_state_space, self.dim_action_space))
-        for i in range(eval_rewards.shape[0]):
-            self.eval_rewards[i, np.arange(self.dim_state_space), self.policy.argmax(-1)] = eval_rewards[i]
-    
     @property
     def name(self) -> str:
-        return f'GVFExplorer'
+        return f'SF-NR'
     
     def forward(self, state: int, step: int) -> int:
-        alpha = self.suggested_exploration_parameter(self.dim_state_space, self.dim_action_space)
-        
-        omega = self.omega[state] / self.omega[state].sum()
-        policy = (1-alpha) * omega + alpha * self.uniform_policy
+        x= self.behavior_policy[state] / self.cfg.temperature
+        eps = 1/np.maximum(1,self.total_state_visits[state].sum())
+        if np.random.rand() < eps:
+            return np.random.choice(self.dim_action_space)
+
+        omega = np.exp(x - np.max(x))  # Subtracting max for numerical stability
+        policy= omega / omega.sum(axis=0) 
+
         return np.random.choice(self.na, p=policy)
 
     def process_experience(self, experience: Experience, step: int) -> None:
-        if (step + 1 ) % self.cfg.policy_update_frequency:
-            for R in self.eval_rewards:
-                mdp = MDP(P=self.empirical_transition())
-                hat_values = np.array([
-                    policy_evaluation(self.discount_factor, 
-                                    mdp.P,
-                                    R=self.eval_rewards[r], policy=self.policy.argmax(-1))
-                                    for r in range(self.eval_rewards.shape[0])]).T
-                P = mdp.P[np.arange(mdp.P.shape[0]), self.policy.argmax(-1)]
-                avg_V = P @ hat_values
-                var_V =  P @ (hat_values ** 2) - (avg_V) ** 2
-                M = var_V.sum(-1)
-                import pdb
-                pdb.set_trace()
-                
+        alpha_t = 1/self.state_action_visits[experience.s_t, experience.a_t]
+        prev_psi = self.psi.copy()
+    
+        for p in range(self.num_policies):
+            tgt = self.discount_psi * self.psi[p, experience.s_tp1, self.policies[p, experience.s_tp1].argmax()]
+            delta = 1+ tgt -self.psi[p, experience.s_t, experience.a_t]
+            self.psi[p, experience.s_t, experience.a_t] += alpha_t * delta
+        delta_psi = np.abs((self.psi - prev_psi).reshape(self.num_policies, -1)).sum(-1).mean()
+
+
+        tgt = self.discount_factor * self.behavior_policy[experience.s_tp1].max()
+        delta = delta_psi + tgt - self.behavior_policy[experience.s_t, experience.a_t]
+
+        self.behavior_policy[experience.s_t, experience.a_t] += alpha_t * delta
             
 
     def suggested_exploration_parameter(self, dim_state: int, dim_action: int) -> float:
-        return self.cfg.noise_parameter
+        return 1

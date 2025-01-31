@@ -1,3 +1,4 @@
+from __future__ import annotations
 import numpy as np
 import numpy.typing as npt
 from dataclasses import dataclass
@@ -5,16 +6,16 @@ from multireward_ope.tabular.agents.base_agent import Agent, Experience
 from enum import Enum
 from multireward_ope.tabular.mdp import MDP
 from multireward_ope.tabular.utils import policy_evaluation
-
+from multireward_ope.tabular.reward_set import RewardSetType
 @dataclass
 class GVFExplorerConfig:
     noise_parameter: float
     policy_update_frequency: int
 
 
-    @classmethod
-    def name(cls) -> str:
-        return ''
+    @staticmethod
+    def name(cls: GVFExplorerConfig) -> str:
+        return f''
 
     
 class GVFExplorer(Agent):
@@ -26,12 +27,11 @@ class GVFExplorer(Agent):
                  cfg: GVFExplorerConfig, **kwargs):
         self.cfg = cfg
         super().__init__(**kwargs)
-        self.uniform_policy = np.ones(self.dim_action_space) / self.dim_action_space
-        eval_rewards = self.rewards.canonical_rewards()
 
-        self.eval_rewards = np.zeros((eval_rewards.shape[0], self.dim_state_space, self.dim_action_space))
-        for i in range(eval_rewards.shape[0]):
-            self.eval_rewards[i, np.arange(self.dim_state_space), self.policy.argmax(-1)] = eval_rewards[i]
+        assert len(self.policies) > 1 and np.all([rew.set_type == RewardSetType.FINITE for rew in self.rewards]), 'GVFExplorer Only supports multiple policies and finite rewards'
+
+        self.uniform_policy = np.ones(self.dim_action_space) / self.dim_action_space
+        self.M = np.ones((self.num_policies, self.dim_state_space))
     
     @property
     def name(self) -> str:
@@ -39,26 +39,32 @@ class GVFExplorer(Agent):
     
     def forward(self, state: int, step: int) -> int:
         alpha = self.suggested_exploration_parameter(self.dim_state_space, self.dim_action_space)
-        
-        omega = self.omega[state] / self.omega[state].sum()
-        policy = (1-alpha) * omega + alpha * self.uniform_policy
+
+        policy = np.sqrt((self.policies[:, state] * self.M[:,state, None]).sum(0)) + 1e-7
+        policy = policy / policy.sum()
+        policy = (1-alpha) * policy + alpha * self.uniform_policy
         return np.random.choice(self.na, p=policy)
 
     def process_experience(self, experience: Experience, step: int) -> None:
-        if (step + 1 ) % self.cfg.policy_update_frequency:
-            for R in self.eval_rewards:
+        if (step + 1 ) % self.cfg.policy_update_frequency == 0:
+            for rid, reward_set in enumerate(self.rewards):
+                R = reward_set.rewards
                 mdp = MDP(P=self.empirical_transition())
-                hat_values = np.array([
-                    policy_evaluation(self.discount_factor, 
+                pol = self.policies[rid].argmax(-1)
+                rew = np.zeros((self.dim_state_space, self.dim_action_space))
+                rew[np.arange(self.dim_state_space), pol] = R
+                hat_values = policy_evaluation(self.discount_factor, 
                                     mdp.P,
-                                    R=self.eval_rewards[r], policy=self.policy.argmax(-1))
-                                    for r in range(self.eval_rewards.shape[0])]).T
-                P = mdp.P[np.arange(mdp.P.shape[0]), self.policy.argmax(-1)]
+                                    R=rew, policy=pol)
+                #P = mdp.P[np.arange(mdp.P.shape[0]), pol]
+                P = mdp.P.reshape(-1, mdp.dim_state)
+
                 avg_V = P @ hat_values
                 var_V =  P @ (hat_values ** 2) - (avg_V) ** 2
-                M = var_V.sum(-1)
-                import pdb
-                pdb.set_trace()
+                rew_var = ((self.discount_factor ** 2) * var_V).reshape(mdp.dim_state,-1)
+                var_G = policy_evaluation(self.discount_factor**2, mdp.P, rew_var, policy=pol)
+                
+                self.M[rid] = var_G
                 
             
 

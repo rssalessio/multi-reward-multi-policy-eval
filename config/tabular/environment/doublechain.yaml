@@ -1,4 +1,4 @@
 type: 'DoubleChain'
 parameters:
-  length: 5
+  length: 8
   p: 0.7

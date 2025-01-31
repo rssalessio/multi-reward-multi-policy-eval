@@ -51,6 +51,15 @@ class RewardSet(object):
             Sequence[cp.Constraint]: List of constraints
         """
         raise Exception('Not implemented')
+    
+    @abstractmethod
+    def eval_rewards(self) -> npt.NDArray[np.float64]:
+        """Rewards to be evaluted
+
+        Returns:
+            npt.NDArray[np.float64]: Array o rewards
+        """
+        raise Exception('Not implemented')
 
     def canonical_rewards(self) -> npt.NDArray[np.float64]:
         """Generate the canonical (projected) set of rewards
@@ -123,6 +132,14 @@ class RewardSetCircle(RewardSet):
     def get_constraints(self, var: cp.Variable) -> Sequence[cp.Constraint]:
         constraints = [var >= 0, cp.norm(var - self.config.center, self.config.p) <= self.config.radius, var <= 1]
         return constraints
+    
+    def eval_rewards(self) -> npt.NDArray[np.float64]:
+        """Rewards to be evaluted
+
+        Returns:
+            npt.NDArray[np.float64]: Array o rewards
+        """
+        return self.canonical_rewards()
 
 
 
@@ -178,6 +195,14 @@ class RewardSetPolytope(RewardSet):
         return RewardSetPolytope(num_states, num_actions,
                          RewardSetPolytope.RewardSetPolytopeConfig(halfspaces))
 
+    def eval_rewards(self) -> npt.NDArray[np.float64]:
+        """Rewards to be evaluted
+
+        Returns:
+            npt.NDArray[np.float64]: Array o rewards
+        """
+        return self.rewards
+
 
 class RewardSetRewardFree(RewardSet):
     """ Consider the entire set [0,1]^SA """
@@ -196,6 +221,14 @@ class RewardSetRewardFree(RewardSet):
     def get_constraints(self, var: cp.Variable) -> Sequence[cp.Constraint]:
         constraints = [var >= 0, var <= 1]
         return constraints
+    
+    def eval_rewards(self) -> npt.NDArray[np.float64]:
+        """Rewards to be evaluted
+
+        Returns:
+            npt.NDArray[np.float64]: Array o rewards
+        """
+        return self.canonical_rewards()
 
 class RewardSetFinite(RewardSet):
     """ Consider a finite set of M rewards, each of size S """
@@ -225,6 +258,14 @@ class RewardSetFinite(RewardSet):
     @property
     def rewards(self) -> npt.NDArray[np.float64]:
         return self.config.rewards
+    
+    def eval_rewards(self) -> npt.NDArray[np.float64]:
+        """Rewards to be evaluted
+
+        Returns:
+            npt.NDArray[np.float64]: Array o rewards
+        """
+        return self.rewards
 
 
 

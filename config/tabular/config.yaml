@@ -1,16 +1,17 @@
 defaults:
-  - agent: mr_nas_pe
+  - agent: gvf_explorer
   - environment: narms
   - _self_
 
 experiment:
   num_simulations: 30
-  num_processes: 15
-  horizon: 500000
-  frequency_evaluation: 250
+  num_processes: 30
+  horizon: 10000 #500k
+  frequency_evaluation: 500 #250
   delta: 0.01
   epsilon: 0.1
-  discount_factor: 0.99
+  discount_factor: 0.9
   solver_type: 'GUROBI'
-  reward_set: 'RewardFree'
-  single_policy: True
+  reward_set: 'Finite'
+  single_policy: False
+
