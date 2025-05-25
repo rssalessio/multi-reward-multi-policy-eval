@@ -1,10 +1,11 @@
 
 # Adaptive Exploration for Multi-Reward Multi-Policy Evaluation
-Readme file for the "Adaptive Exploration for Multi-Reward Multi-Policy Evaluation".
+Readme file for the "Adaptive Exploration for Multi-Reward Multi-Policy Evaluation", ICML 2025.
 
-Do not distribute.
+Author: Alessio Russo
+License: MIT
 
-Folder structure:
+## Folder structure
 
 -  `config/`: contains the configurations for the agents/environments, etc.
 -  `data/`: where the data is saved
@@ -13,8 +14,6 @@ Folder structure:
 
 
 ## Instructions
-
-  
 
 - Create a python environment using `python -m venv .venv`. We suggest python3.10.
 - Install the required libraries using `python -m pip install -r .\requirements.txt`. Make sure to have GUROBI installed.
