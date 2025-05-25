@@ -6,7 +6,7 @@ defaults:
 experiment:
   num_simulations: 30
   num_processes: 30
-  horizon: 10000 #500k
+  horizon: 1000000 #500k
   frequency_evaluation: 500 #250
   delta: 0.01
   epsilon: 0.1
