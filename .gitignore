@@ -6,3 +6,6 @@ outputs/*
 .nfs*
 data/*
 code.zip
+bashedloop.sh
+run_multi_*.sh
+run_single_*.sh

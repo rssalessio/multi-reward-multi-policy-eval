@@ -10,12 +10,15 @@ module load python3/3.10.12
 module load gurobi/10.0.1
 source .venv/bin/activate
 
-doublechain_states=15 #8 10 15
-narms_states=30 # 15 20 30
-riverswim_states=30
-forked_riverswim_states=15
+doublechain_states=$1 #8 10 15
+narms_states=$2 # 15 20 30
+riverswim_states=$2
+forked_riverswim_states=$1
 reward_set='Finite'
 single_policy=True
+
+echo "Running with initial arguments: ($doublechain_states,$narms_states,$riverswim_states,$forked_riverswim_states)"
+
 
 python tabular_sim.py experiment.reward_set=$reward_set  experiment.single_policy=$single_policy environment=doublechain environment.parameters.length=$doublechain_states agent=noisy_policy_uniform  agent.parameters.noise_parameter=0.30
 python tabular_sim.py experiment.reward_set=$reward_set  experiment.single_policy=$single_policy environment=doublechain environment.parameters.length=$doublechain_states agent=noisy_policy_visitation  agent.parameters.noise_parameter=0.30

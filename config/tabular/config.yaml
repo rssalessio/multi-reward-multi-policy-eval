@@ -12,6 +12,6 @@ experiment:
   epsilon: 0.1
   discount_factor: 0.9
   solver_type: 'GUROBI'
-  reward_set: 'Finite'
+  reward_set: 'RewardFree'
   single_policy: False
 

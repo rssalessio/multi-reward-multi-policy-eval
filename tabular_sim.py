@@ -49,15 +49,11 @@ def setup_rewards(env: Env, reward_set_type: RewardSetType, single_policy: bool,
         return [(reward_set[0], eval_policy, values)]
     else:
         returns=[]
+        rnd_idxs = np.random.choice(env.dim_state * env.dim_action, size=num_policies, replace=False)
         for id in range(num_policies):
-            # Compute optimal policies from some selected rewards
-            if reward_set[id].set_type == RewardSetType.REWARD_FREE:
-                reward_to_eval=reward_set[id].eval_rewards()[idxs_rewfree[id]]
-            else:
-                reward_to_eval=reward_set[id].eval_rewards()
-
-            rew = np.zeros((env.dim_state, env.dim_action))
-            rew[np.arange(env.dim_state), env.default_policy(discount_factor)] = reward_to_eval
+            rew = np.zeros(env.dim_state * env.dim_action)
+            rew[rnd_idxs[id]] = 1
+            rew = rew.reshape(env.dim_state, env.dim_action)
             _,pol,_ =env.policy_iteration(rew, discount_factor)
             
             # Compute values for those policies on the evaluation rewards
@@ -141,7 +137,7 @@ def run_experiments(cfg: DictConfig):
 
     with mp.Pool(cfg.experiment.num_processes) as pool:
         results = pool.starmap(run_single_experiment, [(x, cfg) for x in range(cfg.experiment.num_simulations)])
-    # results = [run_single_experiment(0, cfg)]
+    #results = [run_single_experiment(0, cfg)]
     rel_results = np.array([res['rel_error'] for res in results])
     abs_results = np.array([res['abs_error'] for res in results])
 
