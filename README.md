@@ -1,5 +1,10 @@
 
 # Adaptive Exploration for Multi-Reward Multi-Policy Evaluation
+
+<p align="center">
+<img src="figures/multirew.jpg" alt="ulti-Reward Multi-Policy Evaluation" width="150" />
+</p>
+
 Readme file for the "[Adaptive Exploration for Multi-Reward Multi-Policy Evaluation](https://arxiv.org/abs/2502.02516)", ICML 2025.
 
 Author: Alessio Russo
@@ -7,7 +12,6 @@ Author: Alessio Russo
 License: MIT
 
 
-<img src="figures/multirew.jpg" alt="ulti-Reward Multi-Policy Evaluation" width="150" />
 ## Folder structure
 
 -  `config/`: contains the configurations for the agents/environments, etc.
@@ -30,7 +34,6 @@ License: MIT
 state_size=small            # State space size: small, medium or large
 reward_set='Finite'         # Finite or RewardFree
 single_policy=True          # True or False for MultiPolicy
-
 
 ```
 
