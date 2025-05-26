@@ -3,8 +3,11 @@
 Readme file for the "Adaptive Exploration for Multi-Reward Multi-Policy Evaluation", ICML 2025.
 
 Author: Alessio Russo
+
 License: MIT
 
+
+![MR-MP Evaluation](figures/multirew.png "Multi-Reward Multi-Policy Evaluation")
 ## Folder structure
 
 -  `config/`: contains the configurations for the agents/environments, etc.
