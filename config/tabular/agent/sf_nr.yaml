@@ -1,0 +1,4 @@
+type: 'SF-NR'
+parameters:
+  discount_psi: 0.99
+  temperature: 2

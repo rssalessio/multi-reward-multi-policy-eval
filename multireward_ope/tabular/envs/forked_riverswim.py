@@ -8,6 +8,7 @@ from multireward_ope.tabular.mdp import MDP
 @dataclass
 class ForkedRiverSwimConfig(object):
     river_length: int = 5
+    p_right: float = 0.3
 
     def build(self) -> ForkedRiverSwim:
         return ForkedRiverSwim(self)
@@ -49,13 +50,13 @@ class ForkedRiverSwim(MDP):
         
         transitions = np.zeros((self.ns, self.na, self.ns))
         
-        
+        y = (1 - cfg.p_right) * 6/7
         # Create transitions
         for start, end in [(1, self._end_river_1), (self._end_river_1 + 1, self._end_river_2)]:
             for s in range(start, end):
-                transitions[s, self._RIGHT, s] = 0.6
-                transitions[s, self._RIGHT, s-1] = 0.1
-                transitions[s, self._RIGHT, s+1] = 0.3
+                transitions[s, self._RIGHT, s] = y
+                transitions[s, self._RIGHT, s-1] = y/6
+                transitions[s, self._RIGHT, s+1] = cfg.p_right
                 
                 other_side = s + cfg.river_length - 1 if s < self._end_river_1 else s - cfg.river_length + 1
                 transitions[s, self._SWITCH, other_side] = 1
@@ -65,11 +66,11 @@ class ForkedRiverSwim(MDP):
         transitions[self._end_river_1+1, self._LEFT, 0] = 1
 
         transitions[0, self._LEFT, 0] = 1
-        transitions[0, self._RIGHT, 0] = 0.7
-        transitions[0, self._RIGHT, 1] = 0.3
+        transitions[0, self._RIGHT, 0] = 1-cfg.p_right
+        transitions[0, self._RIGHT, 1] = cfg.p_right
         for end in [self._end_river_1, self._end_river_2]:
-            transitions[end, self._RIGHT, end] = 0.3
-            transitions[end, self._RIGHT, end-1] = 0.7
+            transitions[end, self._RIGHT, end] = cfg.p_right
+            transitions[end, self._RIGHT, end-1] = 1-cfg.p_right
             transitions[end, self._LEFT, end-1] = 1
             
         transitions[self._end_river_1, self._SWITCH, self._end_river_1] = 1

@@ -35,14 +35,16 @@ class NoisyPolicy(Agent):
     
     def forward(self, state: int, step: int) -> int:
         alpha = self.suggested_exploration_parameter(self.dim_state_space, self.dim_action_space)
+
+        policy = self.mixture_policy[state]
         
         if self.parameters.noise_type == PolicyNoiseType.UNIFORM.value:
-            policy = (1 - alpha) * self.policy[state] + alpha * self.uniform_policy
+            policy = (1 - alpha) * policy + alpha * self.uniform_policy
         elif self.parameters.noise_type == PolicyNoiseType.VISITATION.value:
             visits = np.maximum(1, self.state_action_visits[state])
             exp_visits = -visits + visits.max() + 1
             act_visit = np.exp(np.log(exp_visits) - np.log(np.sum(exp_visits)))
-            policy = (1 - alpha) * self.policy[state] + alpha * act_visit
+            policy = (1 - alpha) * policy + alpha * act_visit
         return np.random.choice(self.na, p=policy)
 
     def process_experience(self, experience: Experience, step: int) -> None:

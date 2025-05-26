@@ -2,7 +2,7 @@ from __future__ import annotations
 import numpy.typing as npt
 import numpy as np
 from abc import ABC, abstractmethod
-from typing import NamedTuple, Callable
+from typing import NamedTuple, Sequence, Tuple
 from multireward_ope.tabular.mdp import MDP
 from multireward_ope.tabular.characteristic_time import BoundResult, CharacteristicTimeSolver
 from multireward_ope.tabular.reward_set import RewardSet
@@ -31,7 +31,7 @@ class Agent(ABC):
     solver: CharacteristicTimeSolver
     policy: npt.NDArray[np.long]
     solver_type: str
-    rewards: RewardSet
+    rewards: Sequence[RewardSet]
 
     # Initialize the agent with agent parameters
     def __init__(self,
@@ -42,10 +42,8 @@ class Agent(ABC):
                  frequency_evaluation: int,
                  delta: float,
                  epsilon: float,
-                 policy: npt.NDArray[np.long],
-                 rewards: RewardSet,
+                 rewards_policies: Sequence[Tuple[RewardSet, npt.NDArray[np.long], np.ndarray]],
                  solver_type: str, **kwargs):
-        self.rewards = rewards
         self.dim_state_space = dim_state
         self.dim_action_space = dim_action
         self.discount_factor = discount_factor
@@ -59,11 +57,20 @@ class Agent(ABC):
         self.frequency_evaluation = frequency_evaluation
         self.delta = delta
         self.solver_type = solver_type
-        self.solver = CharacteristicTimeSolver(self.ns, self.na, solver=self.solver_type)
-        self.solver.build_problem(rewards)
-        self.policy = np.zeros((self.ns, self.na))
-        self.policy[np.arange(self.ns), policy] = 1.
+        self.num_policies = len(rewards_policies)
+
+        self.rewards = [rewards_policies[idx][0] for idx in range(self.num_policies)]
+        self.solver = CharacteristicTimeSolver(self.ns, self.na, self.num_policies, solver=self.solver_type)
+        self.solver.build_problem(self.rewards, [rewards_policies[idx][1] for idx in range(self.num_policies)])
+
+        
+        self.policies = np.zeros((self.num_policies, self.ns, self.na))
+        for p in range(self.num_policies):
+            self.policies[p, np.arange(self.ns), rewards_policies[p][1]] = 1.
         self.epsilon = epsilon
+
+        self.mixture_policy = self.policies.sum(0) / self.policies.sum(0).sum(-1, keepdims=True)
+
 
     @property
     @abstractmethod
@@ -92,13 +99,13 @@ class Agent(ABC):
     def U_t(self) -> float:
         w = self.state_action_visits / self.state_action_visits.sum()
         mdp = MDP(P = self.empirical_transition())
-        policy = self.policy.argmax(-1)
+        policies = self.policies.argmax(-1)
         return self.solver.evaluate(
             omega=w,
             gamma=self.discount_factor,
             epsilon=self.epsilon,
             mdp=mdp,
-            policy=policy,
+            policies=policies,
             force=True
         )
 
