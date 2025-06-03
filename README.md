@@ -19,6 +19,13 @@ License: MIT
 -  `figures/`: figures are saved here
 -  `multireward_ope/`: main library. Here are coded the agents and the environments
 
+## Files
+
+- `plot.ipynb`: notebook for plotting the main results of the paper
+- `example_sample_complexity_riverswim.ipynb`:  notebook for the sample complexity example for riverswim
+- `example_non_convexity.ipynb`: notebook for the non-convexity example
+- `tabular_sim.py`: main training python file
+- `run.sh`: script to run the training across different environments/agents.
 
 ## Instructions
 
@@ -37,8 +44,11 @@ single_policy=True          # True or False for MultiPolicy
 
 ```
 
-
 These variables define the type of experiment (number of states, reward free vs finite rewards and single policy vs multi policy). Results are saved in the `data` folder.
 
 
 Ensure that you also change the number of processes used in `config/tabular/config.yaml`, variable `experiment.num_processes` before running the experiments.
+
+
+- Running the script `run.sh` will create the folder `data` that contains all the data needed to do the main plots. Use the notebook `plot.ipynb` to do the plotting.
+
